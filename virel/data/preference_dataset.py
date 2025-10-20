@@ -17,6 +17,7 @@ class PreferenceDataset(Dataset):
         n_steps: int,
         policy: Callable,
         env: gym.Env,
+        device: str,
         rationality: float = 1.0,
         obs_transform: Callable = None,
         act_transform: Callable = None
@@ -36,6 +37,7 @@ class PreferenceDataset(Dataset):
         self.rationality = rationality
         self.obs_transform = obs_transform
         self.act_transform = act_transform
+        self.device = device
 
         # Generate trajectory pairs and preferences
         self.obs_seq_pairs, self.acts_seq_pairs, self.preferences = self.generate_preferences(policy=policy)
@@ -122,11 +124,22 @@ class PreferenceDataset(Dataset):
         acts1, acts2 = self.acts_seq_pairs[idx]
         preference = self.preferences[idx]
         
-        return (torch.tensor(obs1, dtype=torch.float32), 
-                torch.tensor(acts1, dtype=torch.float32), 
-                torch.tensor(obs2, dtype=torch.float32), 
-                torch.tensor(acts2, dtype=torch.float32), 
-                torch.tensor(preference, dtype=torch.float32).unsqueeze(0))
+        # Convert observations to tensors
+        obs1_tensor = torch.tensor(obs1, dtype=torch.float32).to(self.device)
+        obs2_tensor = torch.tensor(obs2, dtype=torch.float32).to(self.device)
+        
+        # Handle actions - if act_transform was applied, acts1/acts2 are lists of tensors
+        if self.act_transform:
+            # Stack the already transformed tensors
+            acts1_tensor = torch.stack(acts1).to(self.device)
+            acts2_tensor = torch.stack(acts2).to(self.device)
+        else:
+            # Convert to tensor if no transformation was applied
+            acts1_tensor = torch.tensor(acts1, dtype=torch.float32).to(self.device)
+            acts2_tensor = torch.tensor(acts2, dtype=torch.float32).to(self.device)
+        
+        return (obs1_tensor, acts1_tensor, obs2_tensor, acts2_tensor, 
+                torch.tensor(preference, dtype=torch.float32).unsqueeze(0).to(self.device))
     
     def get_all_data(self):
         """
