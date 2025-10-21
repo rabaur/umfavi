@@ -25,6 +25,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
             **kwargs: Additional arguments including:
                 - obs: Float tensor of shape (batch_size, num_steps, obs_dim).
                 - acts: Float tensor of shape (batch_size, num_steps, act_dim).
+                - reward_mean: Float tensor of shape (batch_size, num_steps) - mean of reward distribution.
+                - reward_log_var: Float tensor of shape (batch_size, num_steps) - log variance of reward distribution.
                 - rationality: Rationality coefficient (default: 1.0).
                 - gamma: Discount factor (default: 0.99).
                 - td_error_weight: Weight for the TD-error constraint (default: 1.0).
@@ -34,47 +36,60 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # Extract parameters from kwargs
         obs = kwargs["obs"]
         acts = kwargs["acts"]
+        reward_means = kwargs["reward_mean"]
+        reward_log_vars = kwargs["reward_log_var"]
         rationality = kwargs.get("rationality", 1.0)
         gamma = kwargs.get("gamma", 0.99)
         td_error_weight = kwargs.get("td_error_weight", 1.0)
+
+        # Get obs shape for reshaping
+        batch_size, num_steps, obs_dim = obs.shape
         
-        # For this decoder, we need reward_means and reward_log_vars, but we only have reward_samples
-        # We'll use the samples as means and assume zero variance for now
-        # This is a simplification - in practice, you might want to pass these separately
-        reward_means = reward_samples
-        reward_log_vars = torch.zeros_like(reward_samples)
-        # Flatten the first two dimensions of obs and acts such that the shape is (batch_size * num_steps, obs_dim) and (batch_size * num_steps, act_dim)
-        obs = obs.view(obs.shape[0] * obs.shape[1], -1)
-        acts = acts.view(acts.shape[0] * acts.shape[1], -1)
-
+        # Flatten obs to (batch_size * num_steps, obs_dim) for Q-value model
+        obs_flat = obs.reshape(batch_size * num_steps, obs_dim)
+        
         # Get the Q-value estimates
-        q_values = self.Q_value_model(obs)  # (batch_size * num_steps, n_actions)
-
-        # Transform back
-        q_values = q_values.view(obs.shape[0], obs.shape[1], -1)  # (batch_size, num_steps, n_actions)
+        q_values_flat = self.Q_value_model(obs_flat)  # (batch_size * num_steps, n_actions)
+        
+        # Reshape back to (batch_size, num_steps, n_actions)
+        q_values = q_values_flat.reshape(batch_size, num_steps, -1)
 
         # ------------------------------------------------------------------------------------------------
         # TD-error constraint
         # ------------------------------------------------------------------------------------------------
 
-
-        # Compute the TD-error Q(s', a') - Q(s, a)
-        td_error = q_values[:, 1:] - gamma * q_values[:, :-1]  # (batch_size, num_steps - 1, n_actions)
-
-        # Select TD-error for observed (s, a) pairs
-        act_integer = torch.argmax(acts, dim=-1).squeeze()[:, :-1] # (batch_size, num_steps - 1)
-        td_error = td_error[..., act_integer]  # (batch_size, num_steps - 1)
+        # Compute the TD-error: R(s_t, a_t) = Q(s_t, a_t) - γ * Q(s_{t+1}, a_{t+1})
+        # From Bellman equation: Q(s_t, a_t) = R(s_t, a_t) + γ * Q(s_{t+1}, a_{t+1})
+        
+        # Get action indices
+        act_integer = torch.argmax(acts, dim=-1)  # (batch_size, num_steps)
+        act_integer_curr = act_integer[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
+        act_integer_next = act_integer[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
+        
+        # Select Q(s_t, a_t) for current state-action pairs
+        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr.unsqueeze(-1)).squeeze(-1)  # (batch_size, num_steps - 1)
+        
+        # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
+        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next.unsqueeze(-1)).squeeze(-1)  # (batch_size, num_steps - 1)
+        
+        # Compute TD-error (which should equal the reward)
+        td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1)
 
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
-        q_theta = torch.distributions.Normal(reward_means, torch.exp(reward_log_vars))
-        td_error_nll = -q_theta.log_prob(td_error).sum(dim=1)
+        reward_means_2d = reward_means.squeeze(-1)  # (batch_size, num_steps)
+        reward_log_vars_2d = reward_log_vars.squeeze(-1)  # (batch_size, num_steps)
+        
+        q_theta = torch.distributions.Normal(reward_means_2d[:, :-1], torch.exp(reward_log_vars_2d[:, :-1]))
+        td_error_nll = -q_theta.log_prob(td_error_selected).sum(dim=1).mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        log_probs = torch.log_softmax(rationality * q_values, dim=1)
-        demonstrations_nll = -log_probs.gather(1, act_integer).sum(dim=1)
+        log_probs = torch.log_softmax(rationality * q_values, dim=-1)  # (batch_size, num_steps, n_actions)
+        
+        # Gather log probabilities for the actions taken
+        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer.unsqueeze(-1)).squeeze(-1).sum(dim=1).mean()  # (batch_size,)
 
         return demonstrations_nll + td_error_nll * td_error_weight

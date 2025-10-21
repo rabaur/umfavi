@@ -4,8 +4,123 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from virel.utils.gym import rollout, get_obs_act_pairs, get_rewards
-from virel.utils.math import sigmoid
+from virel.utils.gym import rollout, get_obs_act_pairs
 
 class DemonstrationDataset(Dataset):
-    pass
+    """
+    Dataset for demonstration learning with expert trajectories.
+    """
+    def __init__(
+        self, 
+        n_samples: int,   
+        n_steps: int,
+        policy: Callable,
+        env: gym.Env,
+        device: str,
+        obs_transform: Callable = None,
+        act_transform: Callable = None
+    ):
+        """
+        Initialize demonstration dataset.
+        
+        Args:
+            n_samples: Number of demonstration trajectories to generate
+            n_steps: Length of each trajectory
+            policy: Expert policy to generate demonstrations
+            env: Gymnasium environment
+            device: Device to store tensors on ('cpu' or 'cuda')
+            obs_transform: Optional transformation for observations
+            act_transform: Optional transformation for actions
+        """
+        self.n_samples = n_samples
+        self.n_steps = n_steps
+        self.env = env
+        self.obs_transform = obs_transform
+        self.act_transform = act_transform
+        self.device = device
+
+        # Generate demonstrations
+        self.obs_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
+        
+    def add_demonstrations(self, policy: Callable) -> None:
+        """
+        Add demonstrations to the dataset.
+        """
+        obs_seqs, acts_seqs = self.generate_demonstrations(policy)
+        if self.obs_seqs is None:
+            self.obs_seqs, self.acts_seqs = obs_seqs, acts_seqs
+        else:
+            self.obs_seqs.extend(obs_seqs)
+            self.acts_seqs.extend(acts_seqs)
+        self.n_samples = len(self.obs_seqs)
+    
+    def generate_demonstrations(self, policy: Callable) -> tuple[list[list], list[list]]:
+        """
+        Generate expert demonstration trajectories.
+        
+        Returns:
+            Tuple of (obs_seqs, acts_seqs) where:
+            - obs_seqs: List of observation sequences
+            - acts_seqs: List of action sequences
+        """
+        obs_seqs = []
+        acts_seqs = []
+        
+        for _ in range(self.n_samples):
+            # Generate trajectory using the expert policy
+            trajectory = rollout(self.env, policy, n_steps=self.n_steps)
+
+            # Extract state-action pairs from trajectory
+            obs, acts = get_obs_act_pairs(trajectory)
+
+            # Transform observations and actions
+            if self.obs_transform:
+                obs = list(map(self.obs_transform, obs))
+            
+            if self.act_transform:
+                acts = list(map(self.act_transform, acts))
+
+            # Append the newly generated trajectory
+            obs_seqs.append(obs)
+            acts_seqs.append(acts)
+            
+        return obs_seqs, acts_seqs
+    
+    def __len__(self):
+        return self.n_samples
+    
+    def __getitem__(self, idx) -> dict:
+        """
+        Get a demonstration sample.
+        
+        Args:
+            idx: Index of the sample
+            
+        Returns:
+            Dictionary with:
+            - feedback_type: "demonstration"
+            - obs: Observation sequence tensor
+            - acts: Action sequence tensor (targets for behavioral cloning)
+            - targets: Same as acts (for consistency with other datasets)
+        """
+        obs = self.obs_seqs[idx]
+        acts = self.acts_seqs[idx]
+        
+        # Convert observations to tensors
+        obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
+        
+        # Handle actions - if act_transform was applied, acts is a list of tensors
+        if self.act_transform:
+            # Stack the already transformed tensors
+            acts_tensor = torch.stack(acts).to(self.device)
+        else:
+            # Convert to tensor if no transformation was applied
+            acts_tensor = torch.tensor(acts, dtype=torch.float32).to(self.device)
+        acts_tensor = acts_tensor
+        
+        return {
+            "feedback_type": "demonstration",
+            "obs": obs_tensor,
+            "acts": acts_tensor,
+            "targets": acts_tensor
+        }
