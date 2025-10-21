@@ -138,8 +138,16 @@ class PreferenceDataset(Dataset):
             acts1_tensor = torch.tensor(acts1, dtype=torch.float32).to(self.device)
             acts2_tensor = torch.tensor(acts2, dtype=torch.float32).to(self.device)
         
-        return (obs1_tensor, acts1_tensor, obs2_tensor, acts2_tensor, 
-                torch.tensor(preference, dtype=torch.float32).unsqueeze(0).to(self.device))
+        # Concatenate obs and acts for easier handling
+        obs_tensor = torch.stack([obs1_tensor, obs2_tensor], dim=0)
+        acts_tensor = torch.stack([acts1_tensor, acts2_tensor], dim=0)
+        preference = torch.tensor(preference, dtype=torch.float32).unsqueeze(0).to(self.device)
+        return {
+            "feedback_type": "preference",
+            "obs": obs_tensor,
+            "acts": acts_tensor,
+            "targets": preference.squeeze()
+        }
     
     def get_all_data(self):
         """

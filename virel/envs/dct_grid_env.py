@@ -268,14 +268,30 @@ class DCTGridEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
     def __init__(self, grid_size, n_dct_basis_fns, reward_type, p_rand):
+        """
+        Creates a discrete grid environment with Discrete-Cosine-Transform base-functions as observed features.
+
+        Args:
+            grid_size (int): The number of grid points in each dimension.
+            n_dct_basis_fns (int): The number of DCT basis functions.
+            reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff".
+            p_rand (float): The probability of transitioning to a random state. Must be in [0, 1].
+        """
         super().__init__()
         self.grid_size = grid_size
         self.n_dct_basis_fns = n_dct_basis_fns
-        # compute S (features) etc. using your existing code
+        self.reward_type = reward_type
+        assert 0 <= p_rand <= 1, "p_rand must be in [0, 1]"
+        assert reward_type in ["sparse", "dense", "path", "cliff"], "Invalid reward type"
+        self.p_rand = p_rand
+
+        # Compute S (features) etc. using existing code
         _, self.R, self.S = dct_grid_env(grid_size, n_dct_basis_fns, reward_type, p_rand)
-        # action space
+
+        # Action space
         self.action_space = spaces.Discrete(len(Action))
-        # observation space
+
+        # Observation space
         self.observation_space = spaces.Dict({
             "coord": spaces.Box(low=np.array([0,0]), high=np.array([grid_size-1, grid_size-1]), dtype=np.int32, shape=(2,)),
             "observation": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(self.S.shape[1],))
@@ -285,7 +301,7 @@ class DCTGridEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        # maybe choose a random (i,j)
+        # Choose a random (i,j)
         i = self.np_random.integers(self.grid_size)
         j = self.np_random.integers(self.grid_size)
         self.state_coord = (i, j)

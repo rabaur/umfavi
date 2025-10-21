@@ -1,7 +1,7 @@
 from typing import Any
 import torch
 from torch import nn
-from virel.priors import kl_divergence_normal
+from virel.priors import kl_divergence_std_normal
 from virel.log_likelihoods.base_log_likelihood import BaseLogLikelihood
 
 
@@ -17,7 +17,7 @@ class SingleFeedbackTypeModel(nn.Module):
         r_samples = self.encoder.sample(mean, log_var)
         preds = self.decoder(r_samples)
         ll = self.decoder.nll(preds, targets)
-        kl_div = kl_divergence_normal(mean, log_var)
+        kl_div = kl_divergence_std_normal(mean, log_var)
         loss_dict = {
             "negative_log_likelihood": ll,
             "kl_divergence": kl_div

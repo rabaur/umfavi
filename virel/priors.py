@@ -1,6 +1,6 @@
 import torch
 
-def kl_divergence_normal(mean: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
+def kl_divergence_std_normal(mean: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
     """
     Compute KL divergence between q(reward|x) and p(reward) = N(0, 1).
     
