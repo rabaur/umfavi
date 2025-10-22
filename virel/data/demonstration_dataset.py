@@ -18,7 +18,9 @@ class DemonstrationDataset(Dataset):
         env: gym.Env,
         device: str,
         obs_transform: Callable = None,
-        act_transform: Callable = None
+        act_transform: Callable = None,
+        rationality: float = 1.0,
+        gamma: float = 0.99
     ):
         """
         Initialize demonstration dataset.
@@ -31,6 +33,8 @@ class DemonstrationDataset(Dataset):
             device: Device to store tensors on ('cpu' or 'cuda')
             obs_transform: Optional transformation for observations
             act_transform: Optional transformation for actions
+            rationality: Rationality parameter for expert policy
+            gamma: Discount factor for Q-value computation
         """
         self.n_samples = n_samples
         self.n_steps = n_steps
@@ -38,7 +42,8 @@ class DemonstrationDataset(Dataset):
         self.obs_transform = obs_transform
         self.act_transform = act_transform
         self.device = device
-
+        self.rationality = rationality
+        self.gamma = gamma
         # Generate demonstrations
         self.obs_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
         
@@ -122,5 +127,7 @@ class DemonstrationDataset(Dataset):
             "feedback_type": "demonstration",
             "obs": obs_tensor,
             "acts": acts_tensor,
-            "targets": acts_tensor
+            "targets": acts_tensor,
+            "rationality": self.rationality,
+            "gamma": self.gamma,
         }

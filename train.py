@@ -76,11 +76,11 @@ def main(args):
         pref_dataset = PreferenceDataset(
             n_samples=args.num_pref_samples,
             n_steps=args.num_steps,
-            rationality=args.pref_rationality,
             env=env,
             policy=uniform_policy,
             device=device,
             act_transform=one_hot_encode_actions,
+            rationality=args.pref_rationality,
         )
         dataloaders["preference"] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created preference dataset with {len(pref_dataset)} samples")
@@ -93,6 +93,8 @@ def main(args):
             policy=expert_policy,
             device=device,
             act_transform=one_hot_encode_actions,
+            rationality=args.expert_rationality,
+            gamma=args.gamma,
         )
         dataloaders["demonstration"] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
@@ -178,6 +180,7 @@ def main(args):
                 )
                 
                 # Accumulate gradients (don't step yet)
+                loss /= len(dataloaders) # normalize by the number of feedback types
                 loss.backward()
                 
                 # Track losses
@@ -221,8 +224,9 @@ def main(args):
         
         # Evaluation
         fb_model.eval()
-        with torch.no_grad():
-            visualize_rewards(env, None, one_hot_encode_actions, fb_model, device)
+        if (epoch + 1) % 10 == 0:
+            with torch.no_grad():
+                visualize_rewards(env, one_hot_encode_actions, fb_model, device)
 
         
 
@@ -231,24 +235,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=100, help="Number of demonstration samples (0 to disable)")
-    parser.add_argument("--num_steps", type=int, default=100, help="Length of each trajectory")
+    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=5.0, help="Rationality for expert policy")
+    parser.add_argument("--expert_rationality", type=float, default=2.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--kl_weight", type=float, default=0.1)
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--kl_weight", type=float, default=1.0)
     
     # Environment parameters
-    parser.add_argument("--grid_size", type=int, default=16)
+    parser.add_argument("--grid_size", type=int, default=8)
     parser.add_argument("--n_dct_basis_fns", type=int, default=8)
-    parser.add_argument("--reward_type", type=str, default="sparse")
+    parser.add_argument("--reward_type", type=str, default="five_goals")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
     args = parser.parse_args()

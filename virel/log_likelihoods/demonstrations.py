@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from virel.log_likelihoods.base_log_likelihood import BaseLogLikelihood
+from virel.utils.math import log_var_to_std
 
 class DemonstrationsDecoder(BaseLogLikelihood):
 
@@ -38,8 +39,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         acts = kwargs["acts"]
         reward_means = kwargs["reward_mean"]
         reward_log_vars = kwargs["reward_log_var"]
-        rationality = kwargs.get("rationality", 1.0)
-        gamma = kwargs.get("gamma", 0.99)
+        rationality = kwargs["rationality"][0].item()
+        gamma = kwargs["gamma"][0].item()
         td_error_weight = kwargs.get("td_error_weight", 1.0)
 
         # Get obs shape for reshaping
@@ -59,27 +60,27 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # ------------------------------------------------------------------------------------------------
 
         # Compute the TD-error: R(s_t, a_t) = Q(s_t, a_t) - γ * Q(s_{t+1}, a_{t+1})
-        # From Bellman equation: Q(s_t, a_t) = R(s_t, a_t) + γ * Q(s_{t+1}, a_{t+1})
         
         # Get action indices
-        act_integer = torch.argmax(acts, dim=-1)  # (batch_size, num_steps)
+        act_integer = torch.argmax(acts, dim=-1).unsqueeze(-1)  # (batch_size, num_steps, 1)
         act_integer_curr = act_integer[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
         act_integer_next = act_integer[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
         
         # Select Q(s_t, a_t) for current state-action pairs
-        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr.unsqueeze(-1)).squeeze(-1)  # (batch_size, num_steps - 1)
+        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr).squeeze(-1)  # (batch_size, num_steps - 1)
         
         # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
-        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next.unsqueeze(-1)).squeeze(-1)  # (batch_size, num_steps - 1)
+        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next).squeeze(-1)  # (batch_size, num_steps - 1)
         
         # Compute TD-error (which should equal the reward)
         td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1)
 
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
-        reward_means_2d = reward_means.squeeze(-1)  # (batch_size, num_steps)
-        reward_log_vars_2d = reward_log_vars.squeeze(-1)  # (batch_size, num_steps)
+        reward_means = reward_means.squeeze(-1)[..., :-1]  # (batch_size, num_steps - 1)
+        reward_log_vars = reward_log_vars.squeeze(-1)[..., :-1]  # (batch_size, num_steps - 1)
+        reward_stds = log_var_to_std(reward_log_vars)
         
-        q_theta = torch.distributions.Normal(reward_means_2d[:, :-1], torch.exp(reward_log_vars_2d[:, :-1]))
+        q_theta = torch.distributions.Normal(reward_means, reward_stds)
         td_error_nll = -q_theta.log_prob(td_error_selected).sum(dim=1).mean()
 
         # ------------------------------------------------------------------------------------------------
@@ -90,6 +91,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         log_probs = torch.log_softmax(rationality * q_values, dim=-1)  # (batch_size, num_steps, n_actions)
         
         # Gather log probabilities for the actions taken
-        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer.unsqueeze(-1)).squeeze(-1).sum(dim=1).mean()  # (batch_size,)
+        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1).sum(dim=1).mean()  # (batch_size,)
 
         return demonstrations_nll + td_error_nll * td_error_weight

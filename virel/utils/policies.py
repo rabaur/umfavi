@@ -41,9 +41,10 @@ class ExpertPolicy:
         
         # Compute optimal Q-values
         self.Q_optimal = q_opt(self.T, self.R, self.gamma)
-        
+
         # Create softmax policy: π(a|s) = exp(β*Q(s,a)) / Σ_a' exp(β*Q(s,a'))
-        self.policy = softmax(self.rationality * self.Q_optimal, dims=1)
+        policy = softmax(self.rationality * self.Q_optimal, dims=1)
+        self.policy = policy
     
     def _build_transition_matrix(self) -> np.ndarray:
         """

@@ -146,7 +146,8 @@ class PreferenceDataset(Dataset):
             "feedback_type": "preference",
             "obs": obs_tensor,
             "acts": acts_tensor,
-            "targets": preference.squeeze()
+            "targets": preference.squeeze(),
+            "rationality": self.rationality,
         }
     
     def get_all_data(self):

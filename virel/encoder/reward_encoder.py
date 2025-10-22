@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from virel.utils.math import log_var_to_std
 
 class RewardEncoder(nn.Module):
     """Variational, amortized approximation of the reward posterior."""
@@ -17,6 +18,6 @@ class RewardEncoder(nn.Module):
         return mean, logvar
     
     def sample(self, mean: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        std = torch.exp(0.5 * logvar)
+        std = log_var_to_std(logvar)
         eps = torch.randn_like(std)
         return mean + std * eps

@@ -127,6 +127,10 @@ def reward_factory(grid_size: int, reward_type: str):
                 - -1 reward for entering and staying in states (0, :) (top edge), except (0, 0)
                 - -4 reward for entering and staying in states (grid_size - 1, :) (bottom edge), except (grid_size - 1, grid_size - 1)
                 - 0 reward for all other transitions
+            - "five_goals": 5 high-reward states (4 corners + center), all other states have 0 reward
+                - +10 reward for reaching and staying within state (grid_size - 1, grid_size - 1) (bottom right corner)
+                - +3 reward for reaching and staying within states (0, 0) (top left), (0, grid_size - 1) (top right), (grid_size - 1, 0) (bottom left), and (grid_size // 2, grid_size // 2) (center)
+                - 0 reward for all other states and actions
     
     Returns:
         R (np.ndarray): The ground-truth reward function, s.t. R[s, a] is the reward for state s under action a.
@@ -212,6 +216,31 @@ def reward_factory(grid_size: int, reward_type: str):
         R[s_goal_idx, Action.RIGHT] = 4 # stays in goal state (out of bounds)
         R[s_goal_idx, Action.UP] = 0
         R[s_goal_idx, Action.DOWN] = 4 # stays in goal state (out of bounds)
+    elif reward_type == "five_goals":
+        # Define the 5 high-reward state coordinates
+        # 4 corners + center
+        goal_states = [
+            (0, 0, 1),                              # top left
+            (0, grid_size - 1, 1),                  # top right
+            (grid_size - 1, 0, 1),                  # bottom left
+            (grid_size - 1, grid_size - 1, 2),     # bottom right (very high reward)
+            (grid_size // 2, grid_size // 2, 1)     # center
+        ]
+        
+        # For each state in the grid, check if any action leads to a goal state
+        for s in range(n_S):
+            i = s // grid_size
+            j = s % grid_size
+            
+            for a in Action:
+                i_next, j_next = succ_state_deterministic(i, j, a, grid_size)
+                
+                # Check if this action leads to any goal state
+                for goal_i, goal_j, reward_value in goal_states:
+                    if (i_next, j_next) == (goal_i, goal_j):
+                        # Reward for entering or staying in the goal state
+                        R[s, a] = reward_value
+                        break
     return R
 
 def dct_grid_env(grid_size: int, n_dct_basis_fns: int, reward_type: str, p_rand: float):
@@ -274,7 +303,7 @@ class DCTGridEnv(gym.Env):
         Args:
             grid_size (int): The number of grid points in each dimension.
             n_dct_basis_fns (int): The number of DCT basis functions.
-            reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff".
+            reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff", "five_goals".
             p_rand (float): The probability of transitioning to a random state. Must be in [0, 1].
         """
         super().__init__()
@@ -282,7 +311,7 @@ class DCTGridEnv(gym.Env):
         self.n_dct_basis_fns = n_dct_basis_fns
         self.reward_type = reward_type
         assert 0 <= p_rand <= 1, "p_rand must be in [0, 1]"
-        assert reward_type in ["sparse", "dense", "path", "cliff"], "Invalid reward type"
+        assert reward_type in ["sparse", "dense", "path", "cliff", "five_goals"], "Invalid reward type"
         self.p_rand = p_rand
 
         # Compute S (features) etc. using existing code

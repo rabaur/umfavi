@@ -37,3 +37,7 @@ def kl_divergence_normal(mean: torch.Tensor, log_var: torch.Tensor) -> torch.Ten
 def softmax(X: NDArray, dims=tuple[int]) -> NDArray:
     X -= np.max(X)
     return np.exp(X) / np.sum(np.exp(X), axis=dims, keepdims=True)
+
+
+def log_var_to_std(log_var):
+    return torch.exp(0.5 * log_var)
