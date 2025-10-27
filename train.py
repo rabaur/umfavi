@@ -340,8 +340,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=4, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=128, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     
     # Policy parameters
@@ -353,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--kl_weight", type=float, default=0.01, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--kl_restart_epochs", type=float, default=1, help="Number of epochs for KL weight restarts (0 = no restarts, standard cosine annealing)")
     parser.add_argument("--kl_restart_mult", type=float, default=0.5, help="Multiplier for KL weight restarts (T_mult parameter)")
