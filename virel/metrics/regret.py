@@ -4,7 +4,7 @@ from typing import Optional
 from virel.utils.tabular import q_opt
 
 
-def expected_regret(
+def evaluate_regret(
     R_true: NDArray,
     R_est: NDArray,
     P: NDArray,
@@ -16,11 +16,6 @@ def expected_regret(
     """
     Computes expected regret over states.
     """
-    n_states = R_true.shape[0]
-    
-    # Use uniform distribution if not provided
-    if initial_state_dist is None:
-        initial_state_dist = np.ones(n_states) / n_states
     
     # Compute optimal Q-values for the true reward
     Q_true_opt = q_opt(P, R_true, gamma, max_iter=max_iter, tol=tol)

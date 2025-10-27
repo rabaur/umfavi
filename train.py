@@ -8,7 +8,7 @@ from virel.envs.dct_grid_env import DCTGridEnv
 from virel.data.preference_dataset import PreferenceDataset
 from virel.data.demonstration_dataset import DemonstrationDataset
 from virel.metrics.epic import evaluate_epic_distance
-from virel.metrics.regret import expected_regret
+from virel.metrics.regret import evaluate_regret
 from virel.multi_fb_model import MultiFeedbackTypeModel
 from virel.utils.policies import UniformPolicy, ExpertPolicy
 from virel.encoder.reward_encoder import RewardEncoder
@@ -301,7 +301,7 @@ def main(args):
                     gamma=args.gamma)
                 
                 # Compute expected regret
-                regret = expected_regret(
+                regret = evaluate_regret(
                     R_est=R_est,
                     R_true=env.R,
                     P=env.P,
