@@ -81,7 +81,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         reward_stds = log_var_to_std(reward_log_vars)
         
         q_theta = torch.distributions.Normal(reward_means, reward_stds)
-        td_error_nll = -q_theta.log_prob(td_error_selected).sum(dim=1).mean()
+        td_error_nll = -q_theta.log_prob(td_error_selected).sum()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -91,6 +91,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         log_probs = torch.log_softmax(rationality * q_values, dim=-1)  # (batch_size, num_steps, n_actions)
         
         # Gather log probabilities for the actions taken
-        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1).sum(dim=1).mean()  # (batch_size,)
+        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1).sum()  # (batch_size,)
 
         return demonstrations_nll + td_error_nll * td_error_weight

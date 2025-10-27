@@ -223,7 +223,7 @@ def reward_factory(grid_size: int, reward_type: str):
             (0, 0, 1),                              # top left
             (0, grid_size - 1, 1),                  # top right
             (grid_size - 1, 0, 1),                  # bottom left
-            (grid_size - 1, grid_size - 1, 2),     # bottom right (very high reward)
+            (grid_size - 1, grid_size - 1, 1),     # bottom right (very high reward)
             (grid_size // 2, grid_size // 2, 1)     # center
         ]
         
@@ -280,9 +280,11 @@ def dct_grid_env(grid_size: int, n_dct_basis_fns: int, reward_type: str, p_rand:
                     # If this is the intended action, we go to the new state with probability 1 - p_rand
                     if a == a_prime:
                         P[s, a, s_prime] = 1 - p_rand
-                    # If this is a random action, we go to the new state with probability p_rand / (n_S - 1)
+                    # If this is a random action, we go to the state corresponding
+                    # to the random action with probability p_rand / (n_A - 1)
+                    # (p_rand is distributed uniformly over n_A - 1 other random actions)
                     else:
-                        P[s, a, s_prime] += p_rand / (n_S - 1)
+                        P[s, a, s_prime] += p_rand / (n_A - 1)
     
     # Create reward matrix
     R = reward_factory(grid_size, reward_type)
@@ -315,8 +317,7 @@ class DCTGridEnv(gym.Env):
         self.p_rand = p_rand
 
         # Compute S (features) etc. using existing code
-        _, self.R, self.S = dct_grid_env(grid_size, n_dct_basis_fns, reward_type, p_rand)
-
+        self.P, self.R, self.S = dct_grid_env(grid_size, n_dct_basis_fns, reward_type, p_rand)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 

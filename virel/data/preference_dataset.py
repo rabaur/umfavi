@@ -147,7 +147,7 @@ class PreferenceDataset(Dataset):
             "obs": obs_tensor,
             "acts": acts_tensor,
             "targets": preference.squeeze(),
-            "rationality": self.rationality,
+            "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
         }
     
     def get_all_data(self):
