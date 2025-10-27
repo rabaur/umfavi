@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+from virel.envs.dct_grid_env import DCTGridEnv
 from virel.utils.tabular import q_opt
 from virel.utils.math import softmax
 
@@ -21,7 +22,7 @@ class ExpertPolicy:
     Uses softmax over Q-values: π(a|s) = exp(β*Q(s,a)) / Σ_a' exp(β*Q(s,a'))
     """
 
-    def __init__(self, env, rationality: float = 1.0, gamma: float = 0.99):
+    def __init__(self, env: DCTGridEnv, rationality: float = 1.0, gamma: float = 0.99):
         """
         Initialize expert policy.
         
@@ -34,42 +35,12 @@ class ExpertPolicy:
         self.rationality = rationality
         self.gamma = gamma
         
-        # Compute transition matrix and get reward matrix from env
-        # For DCTGridEnv, we need to construct the transition matrix
-        self.T = self._build_transition_matrix()
-        self.R = env.R
-        
         # Compute optimal Q-values
-        self.Q_optimal = q_opt(self.T, self.R, self.gamma)
+        self.Q_optimal = q_opt(env.P, env.R, self.gamma)
 
         # Create softmax policy: π(a|s) = exp(β*Q(s,a)) / Σ_a' exp(β*Q(s,a'))
         policy = softmax(self.rationality * self.Q_optimal, dims=1)
         self.policy = policy
-    
-    def _build_transition_matrix(self) -> np.ndarray:
-        """
-        Build transition matrix for DCTGridEnv.
-        For now, assumes deterministic transitions (p_rand = 0).
-        """
-        grid_size = self.env.grid_size
-        n_states = grid_size ** 2
-        n_actions = self.env.action_space.n
-        
-        T = np.zeros((n_states, n_actions, n_states))
-        
-        # For deterministic case, copy logic from dct_grid_env
-        from virel.envs.dct_grid_env import Action, succ_state_deterministic
-        
-        for i in range(grid_size):
-            for j in range(grid_size):
-                s = i * grid_size + j
-                for a in range(n_actions):
-                    # Deterministic case: agent always goes to intended state
-                    i_next, j_next = succ_state_deterministic(i, j, Action(a), grid_size)
-                    s_next = i_next * grid_size + j_next
-                    T[s, a, s_next] = 1.0
-        
-        return T
     
     def __call__(self, observation):
         """

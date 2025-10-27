@@ -59,7 +59,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # TD-error constraint
         # ------------------------------------------------------------------------------------------------
 
-        # Compute the TD-error: R(s_t, a_t) = Q(s_t, a_t) - γ * Q(s_{t+1}, a_{t+1})
+        # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s_t, a_t) - γ * Q(s', a')]
         
         # Get action indices
         act_integer = torch.argmax(acts, dim=-1).unsqueeze(-1)  # (batch_size, num_steps, 1)
@@ -81,7 +81,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         reward_stds = log_var_to_std(reward_log_vars)
         
         q_theta = torch.distributions.Normal(reward_means, reward_stds)
-        td_error_nll = -q_theta.log_prob(td_error_selected).sum()
+        td_error_nll = -q_theta.log_prob(td_error_selected)  # (batch_size, num_steps - 1)
+        td_error_nll = td_error_nll.sum(dim=-1).mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -91,6 +92,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         log_probs = torch.log_softmax(rationality * q_values, dim=-1)  # (batch_size, num_steps, n_actions)
         
         # Gather log probabilities for the actions taken
-        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1).sum()  # (batch_size,)
+        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1)  # (batch_size, num_steps)
+        demonstrations_nll = demonstrations_nll.sum(dim=-1).mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight

@@ -26,4 +26,4 @@ class PreferenceDecoder(BaseLogLikelihood):
         cum_rews1 = cum_rews_per_traj[:, 0].squeeze()
         cum_rews2 = cum_rews_per_traj[:, 1].squeeze()
         logits = rationality * (cum_rews2 - cum_rews1)
-        return nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction='sum')
+        return nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction='mean')
