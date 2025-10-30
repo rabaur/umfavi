@@ -1,6 +1,6 @@
 from torch import nn
 from typing import Any
-from umfavi.log_likelihoods.base_log_likelihood import BaseLogLikelihood
+from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.priors import kl_divergence_std_normal
 
 class MultiFeedbackTypeModel(nn.Module):

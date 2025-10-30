@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
-from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.reward import Rsa_to_Rsas
 
 def canonically_shaped_reward(R_sas: NDArray, gamma: float, d_S: Optional[NDArray] = None, d_A: Optional[NDArray] = None) -> NDArray:
@@ -29,14 +28,13 @@ def canonically_shaped_reward(R_sas: NDArray, gamma: float, d_S: Optional[NDArra
         d_A = np.ones(A) / A
 
     # M[s] = E_{A~D_a, S'~D_s}[ R(s, A, S') ]  shape (S,)
-    M1 = np.einsum('a,p,sap->s', d_A, d_S, R_sas)
-    M2 = np.einsum('s,a,sap->p', d_S, d_A, R_sas)
+    M = np.einsum('a,p,sap->s', d_A, d_S, R_sas)
 
     # G = gamma * E_{S~D_s}[ M[S] ]  scalar (mean reward)
-    G = np.dot(d_S, M1)
+    G = np.dot(d_S, M)
 
     # C[s,a,s'] = R[s,a,s'] + gamma*M[s'] - M[s] - G
-    C_sas = R_sas + gamma * M2 - M1 - gamma * G
+    C_sas = R_sas + gamma * M[None, None, :] - M[:, None, None] - gamma * G
     return C_sas
 
 

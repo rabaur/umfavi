@@ -13,8 +13,8 @@ from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import UniformPolicy, ExpertPolicy
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.features import MLPFeatureModule, QValueModel
-from umfavi.log_likelihoods.preference import PreferenceDecoder
-from umfavi.log_likelihoods.demonstrations import DemonstrationsDecoder
+from umfavi.loglikelihoods.preference import PreferenceDecoder
+from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
 from umfavi.visualization.dct_grid_env_visualizer import visualize_rewards, visualize_state_action_visitation
