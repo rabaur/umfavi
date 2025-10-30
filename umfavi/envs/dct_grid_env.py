@@ -241,6 +241,26 @@ def reward_factory(grid_size: int, reward_type: str):
                         # Reward for entering or staying in the goal state
                         R[s, a] = reward_value
                         break
+    elif reward_type == "gaussian_goals":
+        # Define the 5 high-reward state coordinates
+        # 4 corners + center
+        goal_states = [
+            (0, 0, 1),                              # top left
+            (0, 1, 1),                  # top right
+            (1, 0, 1),                  # bottom left
+            (1, 1, 2),     # bottom right (very high reward)
+            (0.5, 0.5, 1)     # center
+        ]
+        
+        # Add a Gaussian centered at each goal state with a standard deviation of 0.1
+        xs, ys = np.meshgrid(np.linspace(0, 1, grid_size), np.linspace(0, 1, grid_size), indexing='ij')
+        n_S = grid_size ** 2
+        R = np.zeros((grid_size, grid_size))
+        for goal_x, goal_y, scale in goal_states:
+            R += scale * np.exp(-((xs - goal_x) ** 2 + (ys - goal_y) ** 2) / (2 * 0.1 ** 2))
+        R_flat = R.reshape(n_S, -1).squeeze()
+        R = np.repeat(R_flat[:, None], n_A, axis=1) # Each action has same reward for all states
+
     return R
 
 def dct_grid_env(grid_size: int, n_dct_basis_fns: int, reward_type: str, p_rand: float):
@@ -313,7 +333,7 @@ class DCTGridEnv(gym.Env):
         self.n_dct_basis_fns = n_dct_basis_fns
         self.reward_type = reward_type
         assert 0 <= p_rand <= 1, "p_rand must be in [0, 1]"
-        assert reward_type in ["sparse", "dense", "path", "cliff", "five_goals"], "Invalid reward type"
+        assert reward_type in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
         self.p_rand = p_rand
 
         # Compute S (features) etc. using existing code

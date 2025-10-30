@@ -3,11 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Callable
 from vsup import VSUP
-from virel.envs.dct_grid_env import DCTGridEnv, Action
-from virel.multi_fb_model import MultiFeedbackTypeModel
-from virel.utils.math import log_var_to_std
-from virel.metrics.epic import canonically_shaped_reward
-from virel.utils.reward import Rsa_to_Rsas
+from umfavi.envs.dct_grid_env import DCTGridEnv, Action
+from umfavi.multi_fb_model import MultiFeedbackTypeModel
+from umfavi.utils.math import log_var_to_std
+from umfavi.metrics.epic import canonically_shaped_reward
+from umfavi.utils.reward import Rsa_to_Rsas
 
 # Action symbols for visualization
 ACTION_SYMBOLS = {
@@ -234,7 +234,8 @@ def visualize_rewards(
     
     # Convert learned means to Rsas format and apply canonicalization
     learned_means_sas = Rsa_to_Rsas(learned_means_sa)
-    canonicalized_means_sas = canonically_shaped_reward(learned_means_sas, gamma)
+    true_means_sas = Rsa_to_Rsas(env.R)
+    canonicalized_means_sas = canonically_shaped_reward(true_means_sas, gamma)
     
     # Store canonicalized means per action
     all_canonicalized_means = []

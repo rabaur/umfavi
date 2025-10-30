@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from virel.utils.gym import rollout, get_obs_act_pairs
+from umfavi.utils.gym import rollout, get_obs_act_pairs
 
 class DemonstrationDataset(Dataset):
     """

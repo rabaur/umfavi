@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from virel.log_likelihoods.base_log_likelihood import BaseLogLikelihood
-from virel.utils.math import log_var_to_std
+from umfavi.log_likelihoods.base_log_likelihood import BaseLogLikelihood
+from umfavi.utils.math import log_var_to_std
 
 class DemonstrationsDecoder(BaseLogLikelihood):
 
@@ -94,10 +94,10 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        log_probs = torch.log_softmax(rationality * q_values, dim=-1)  # (batch_size, num_steps, n_actions)
-        
-        # Gather log probabilities for the actions taken
-        demonstrations_nll = -log_probs.gather(dim=2, index=act_integer).squeeze(-1)  # (batch_size, num_steps)
-        demonstrations_nll = demonstrations_nll.sum(dim=-1).mean()
+        logits = rationality * q_values  # (batch_size, num_steps, n_actions)
+
+        # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
+        logits = logits.permute(0, 2, 1)
+        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='none').sum(dim=-1).mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight

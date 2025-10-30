@@ -2,13 +2,14 @@ import torch
 import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
-from virel.multi_fb_model import MultiFeedbackTypeModel
-from virel.utils.reward import Rsa_to_Rsas
+from umfavi.multi_fb_model import MultiFeedbackTypeModel
+from umfavi.utils.reward import Rsa_to_Rsas
 
 def canonically_shaped_reward(R_sas: NDArray, gamma: float, d_S: Optional[NDArray] = None, d_A: Optional[NDArray] = None) -> NDArray:
     """
     For a reward function R : S x A x S -> Reals the canonically shaped reward is defined as:
-    C_{dist_S, dist_A}(R)(s,a,s') = R(s,a,s') + E[γR(s',A,S') - R(s,A,S') - γR(S,A,S')] = R(s,a,s') + γE[R(s',A,S')] - E[R(s,A,S')] - γE[R(S,A,S')]
+    C_{dist_S, dist_A}(R)(s,a,s') = R(s,a,s') + E[γR(s',A,S') - R(s,A,S') - γE[R(S,A,S')] 
+                                  = R(s,a,s') + γE[R(s',A,S')] - E[R(s,A,S')] - γE[R(S,A,S')]
 
     Args:
         R_sas: A (|S|, |A|, |S|) array representing the tabular reward.
@@ -28,13 +29,14 @@ def canonically_shaped_reward(R_sas: NDArray, gamma: float, d_S: Optional[NDArra
         d_A = np.ones(A) / A
 
     # M[s] = E_{A~D_a, S'~D_s}[ R(s, A, S') ]  shape (S,)
-    M = np.einsum('a,p,sap->s', d_A, d_S, R_sas)
+    M1 = np.einsum('a,p,sap->s', d_A, d_S, R_sas)
+    M2 = np.einsum('s,a,sap->p', d_S, d_A, R_sas)
 
     # G = gamma * E_{S~D_s}[ M[S] ]  scalar (mean reward)
-    G = gamma * np.dot(d_S, M)
+    G = np.dot(d_S, M1)
 
     # C[s,a,s'] = R[s,a,s'] + gamma*M[s'] - M[s] - G
-    C_sas = R_sas + gamma * M[None, None, :] - M[:, None, None] - G
+    C_sas = R_sas + gamma * M2 - M1 - gamma * G
     return C_sas
 
 

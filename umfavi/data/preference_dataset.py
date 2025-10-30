@@ -4,8 +4,8 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from virel.utils.gym import rollout, get_obs_act_pairs, get_rewards
-from virel.utils.math import sigmoid
+from umfavi.utils.gym import rollout, get_obs_act_pairs, get_rewards
+from umfavi.utils.math import sigmoid
 
 class PreferenceDataset(Dataset):
     """

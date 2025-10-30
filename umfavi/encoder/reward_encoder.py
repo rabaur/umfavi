@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from virel.utils.math import log_var_to_std
+from umfavi.utils.math import log_var_to_std
 
 class RewardEncoder(nn.Module):
     """Variational, amortized approximation of the reward posterior."""

@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
-from virel.utils.tabular import q_opt
+from umfavi.utils.tabular import q_opt
 
 
 def value_under_policy(P, R_true, gamma, pi):

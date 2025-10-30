@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from virel.log_likelihoods.base_log_likelihood import BaseLogLikelihood
+from umfavi.log_likelihoods.base_log_likelihood import BaseLogLikelihood
 
 class PreferenceDecoder(BaseLogLikelihood):
     """Head for predicting preferences."""

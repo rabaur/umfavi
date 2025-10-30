@@ -4,20 +4,20 @@ import itertools
 import wandb
 import numpy as np
 from torch.utils.data import DataLoader
-from virel.envs.dct_grid_env import DCTGridEnv
-from virel.data.preference_dataset import PreferenceDataset
-from virel.data.demonstration_dataset import DemonstrationDataset
-from virel.metrics.epic import evaluate_epic_distance
-from virel.metrics.regret import evaluate_regret
-from virel.multi_fb_model import MultiFeedbackTypeModel
-from virel.utils.policies import UniformPolicy, ExpertPolicy
-from virel.encoder.reward_encoder import RewardEncoder
-from virel.encoder.features import MLPFeatureModule, QValueModel
-from virel.log_likelihoods.preference import PreferenceDecoder
-from virel.log_likelihoods.demonstrations import DemonstrationsDecoder
-from virel.utils.torch import get_device, to_numpy
-from virel.losses import elbo_loss
-from virel.visualization.dct_grid_env_visualizer import visualize_rewards, visualize_state_action_visitation
+from umfavi.envs.dct_grid_env import DCTGridEnv
+from umfavi.data.preference_dataset import PreferenceDataset
+from umfavi.data.demonstration_dataset import DemonstrationDataset
+from umfavi.metrics.epic import evaluate_epic_distance
+from umfavi.metrics.regret import evaluate_regret
+from umfavi.multi_fb_model import MultiFeedbackTypeModel
+from umfavi.utils.policies import UniformPolicy, ExpertPolicy
+from umfavi.encoder.reward_encoder import RewardEncoder
+from umfavi.encoder.features import MLPFeatureModule, QValueModel
+from umfavi.log_likelihoods.preference import PreferenceDecoder
+from umfavi.log_likelihoods.demonstrations import DemonstrationsDecoder
+from umfavi.utils.torch import get_device, to_numpy
+from umfavi.losses import elbo_loss
+from umfavi.visualization.dct_grid_env_visualizer import visualize_rewards, visualize_state_action_visitation
 
 def main(args):
     
@@ -300,12 +300,7 @@ def main(args):
                     gamma=args.gamma)
                 
                 # Compute expected regret
-                regret = evaluate_regret(
-                    R_est=R_est,
-                    R_true=env.R,
-                    P=env.P,
-                    gamma=args.gamma
-                )
+                regret = evaluate_regret(R_est=R_est, R_true=env.R, P=env.P, gamma=args.gamma)
 
 
             # Log to wandb
@@ -340,28 +335,28 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=128, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=1.0, help="Rationality for expert policy")
-    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
+    parser.add_argument("--expert_rationality", type=float, default=2.0, help="Rationality for expert policy")
+    parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--kl_weight", type=float, default=0.01, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--kl_restart_epochs", type=float, default=1, help="Number of epochs for KL weight restarts (0 = no restarts, standard cosine annealing)")
     parser.add_argument("--kl_restart_mult", type=float, default=0.5, help="Multiplier for KL weight restarts (T_mult parameter)")
     
     # Environment parameters
-    parser.add_argument("--grid_size", type=int, default=16)
+    parser.add_argument("--grid_size", type=int, default=32)
     parser.add_argument("--n_dct_basis_fns", type=int, default=11)
-    parser.add_argument("--reward_type", type=str, default="path")
+    parser.add_argument("--reward_type", type=str, default="gaussian_goals")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
     # Visualization parameters

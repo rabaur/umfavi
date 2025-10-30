@@ -1,8 +1,8 @@
 import gymnasium as gym
 import numpy as np
-from virel.envs.dct_grid_env import DCTGridEnv
-from virel.utils.tabular import q_opt
-from virel.utils.math import softmax
+from umfavi.envs.dct_grid_env import DCTGridEnv
+from umfavi.utils.tabular import q_opt
+from umfavi.utils.math import softmax
 
 class UniformPolicy:
     """

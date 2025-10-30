@@ -1,7 +1,7 @@
 from torch import nn
 from typing import Any
-from virel.log_likelihoods.base_log_likelihood import BaseLogLikelihood
-from virel.priors import kl_divergence_std_normal
+from umfavi.log_likelihoods.base_log_likelihood import BaseLogLikelihood
+from umfavi.priors import kl_divergence_std_normal
 
 class MultiFeedbackTypeModel(nn.Module):
 
