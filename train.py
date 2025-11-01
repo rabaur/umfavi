@@ -21,6 +21,20 @@ from umfavi.visualization.dct_grid_env_visualizer import visualize_rewards, visu
 
 def main(args):
     
+    # Generate meaningful run name if not provided
+    if args.wandb_run_name is None:
+        # Create run name from environment and feedback configuration
+        run_name_parts = [args.reward_type]
+        
+        # Add feedback sample counts (only for active feedback types)
+        run_name_parts.append(f"pref{args.num_pref_samples}")
+        run_name_parts.append(f"demo{args.num_demo_samples}")
+        
+        # Add KL weight
+        run_name_parts.append(f"kl{args.kl_weight}")
+        
+        args.wandb_run_name = "-".join(run_name_parts)
+    
     # Initialize wandb
     wandb.init(
         project=args.wandb_project,
@@ -77,18 +91,18 @@ def main(args):
     # Create policies (only if needed)
     policies_created = set()
 
-    uniform_policy = UniformPolicy(env.action_space)
-    policies_created.add("uniform")
-    expert_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
-    policies_created.add("expert")
+    preference_policy = ExpertPolicy(env=env, rationality=0.1, gamma=args.gamma)
+    policies_created.add("preference")
+    demonstration_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
+    policies_created.add("demonstration")
     
     # Test policies if created
     if policies_created:
         print("Testing policies...")
-        if "uniform" in policies_created:
-            print(f"Uniform policy action: {uniform_policy(env.reset())}")
-        if "expert" in policies_created:
-            print(f"Expert policy action: {expert_policy(env.reset())}")
+        if "preference" in policies_created:
+            print(f"Preference policy action: {preference_policy(env.reset())}")
+        if "demonstration" in policies_created:
+            print(f"Demonstration policy action: {demonstration_policy(env.reset())}")
         print()
     
     # Create datasets and dataloaders
@@ -99,7 +113,7 @@ def main(args):
             n_samples=args.num_pref_samples,
             n_steps=args.num_steps,
             env=env,
-            policy=uniform_policy,
+            policy=preference_policy,
             device=device,
             act_transform=one_hot_encode_actions,
             rationality=args.pref_rationality,
@@ -112,11 +126,12 @@ def main(args):
             n_samples=args.num_demo_samples,
             n_steps=args.num_steps,
             env=env,
-            policy=expert_policy,
+            policy=demonstration_policy,
             device=device,
             act_transform=one_hot_encode_actions,
             rationality=args.expert_rationality,
             gamma=args.gamma,
+            td_error_weight=args.td_error_weight,
         )
         dataloaders["demonstration"] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
@@ -326,6 +341,9 @@ def main(args):
             if (epoch + 1) % 10 == 0:
                 with torch.no_grad():
                     visualize_rewards(env, one_hot_encode_actions, fb_model, device)
+            
+            # Set model back to training mode
+            fb_model.train()
     
     # Finish wandb run
     wandb.finish()
@@ -335,28 +353,29 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=128, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=256, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
+    parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=2.0, help="Rationality for expert policy")
+    parser.add_argument("--expert_rationality", type=float, default=1.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--kl_weight", type=float, default=0.01, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--kl_weight", type=float, default=0.05, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--kl_restart_epochs", type=float, default=1, help="Number of epochs for KL weight restarts (0 = no restarts, standard cosine annealing)")
     parser.add_argument("--kl_restart_mult", type=float, default=0.5, help="Multiplier for KL weight restarts (T_mult parameter)")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=32)
     parser.add_argument("--n_dct_basis_fns", type=int, default=11)
-    parser.add_argument("--reward_type", type=str, default="gaussian_goals")
+    parser.add_argument("--reward_type", type=str, default="five_goals")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
     # Visualization parameters

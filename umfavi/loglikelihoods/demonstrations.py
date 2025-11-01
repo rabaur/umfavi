@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch import nn
 from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.utils.math import log_var_to_std
@@ -41,7 +42,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         reward_log_vars = kwargs["reward_log_var"]
         rationality = kwargs["rationality"][0].item()
         gamma = kwargs["gamma"][0].item()
-        td_error_weight = kwargs.get("td_error_weight", 1.0)
+        td_error_weight = kwargs["td_error_weight"][0].item()
 
         # Get obs shape for reshaping
         batch_size, num_steps, obs_dim = obs.shape
@@ -78,10 +79,9 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
         reward_means_sliced = reward_means[:, :-1, :]  # (batch_size, num_steps - 1)
         reward_log_vars_sliced = reward_log_vars[:, :-1, :]  # (batch_size, num_steps - 1)
-        reward_stds_sliced = log_var_to_std(reward_log_vars_sliced)
-        
-        q_theta = torch.distributions.Normal(reward_means_sliced, reward_stds_sliced)
-        td_error_nll = -q_theta.log_prob(td_error_selected)  # (batch_size, num_steps - 1)
+        reward_vars_sliced = reward_log_vars_sliced.exp()
+
+        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced)
 
         # Sum over all timesteps and then average over batches
         td_error_nll = td_error_nll.sum(dim=-1).mean()

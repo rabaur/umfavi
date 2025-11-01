@@ -20,7 +20,8 @@ class DemonstrationDataset(Dataset):
         obs_transform: Callable = None,
         act_transform: Callable = None,
         rationality: float = 1.0,
-        gamma: float = 0.99
+        gamma: float = 0.99,
+        td_error_weight: float = 1.0
     ):
         """
         Initialize demonstration dataset.
@@ -35,6 +36,7 @@ class DemonstrationDataset(Dataset):
             act_transform: Optional transformation for actions
             rationality: Rationality parameter for expert policy
             gamma: Discount factor for Q-value computation
+            td_error_weight: Weight for TD-error constraint in demonstrations
         """
         self.n_samples = n_samples
         self.n_steps = n_steps
@@ -46,7 +48,7 @@ class DemonstrationDataset(Dataset):
         self.gamma = gamma
         # Generate demonstrations
         self.obs_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
-        
+        self.td_error_weight = td_error_weight
     def add_demonstrations(self, policy: Callable) -> None:
         """
         Add demonstrations to the dataset.
@@ -128,6 +130,7 @@ class DemonstrationDataset(Dataset):
             "obs": obs_tensor,
             "acts": acts_tensor,
             "targets": acts_tensor,
-            "rationality": self.rationality,
+            "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
             "gamma": self.gamma,
+            "td_error_weight": torch.tensor(self.td_error_weight).to(self.device, dtype=torch.float32),
         }
