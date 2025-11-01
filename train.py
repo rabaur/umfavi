@@ -336,7 +336,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=128, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     
     # Policy parameters

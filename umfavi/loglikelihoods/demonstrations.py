@@ -70,10 +70,10 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr)  # (batch_size, num_steps - 1)
         
         # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
-        q_next = q_values[:, 1:, :].squeeze(-1)  # (batch_size, num_steps - 1, n_actions)
+        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next)  # (batch_size, num_steps - 1, n_actions)
         
         # Compute TD-error (which should equal the reward)
-        td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1, n_actions)
+        td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1)
 
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
         reward_means_sliced = reward_means[:, :-1, :]  # (batch_size, num_steps - 1)
@@ -82,9 +82,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         
         q_theta = torch.distributions.Normal(reward_means_sliced, reward_stds_sliced)
         td_error_nll = -q_theta.log_prob(td_error_selected)  # (batch_size, num_steps - 1)
-
-        # Mean over all next actions
-        td_error_nll = td_error_nll.mean(dim=-1).squeeze()
 
         # Sum over all timesteps and then average over batches
         td_error_nll = td_error_nll.sum(dim=-1).mean()
