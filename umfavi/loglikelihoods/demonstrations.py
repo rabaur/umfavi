@@ -84,7 +84,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced)
 
         # Sum over all timesteps and then average over batches
-        td_error_nll = td_error_nll.sum(dim=-1).mean()
+        td_error_nll = td_error_nll.mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -95,6 +95,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='none').sum(dim=-1).mean()
+        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='mean')
 
         return demonstrations_nll + td_error_nll * td_error_weight

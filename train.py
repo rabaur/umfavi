@@ -180,15 +180,11 @@ def main(args):
     # Watch model with wandb (log gradients and parameters)
     wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
 
-    # Create KL weight scheduler using cosine annealing with warm restarts
-    # We use a dummy parameter to leverage PyTorch's scheduler
-    dummy_param = torch.nn.Parameter(torch.tensor(1.0))
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in dataloaders.items()}
     batches_per_epoch = max(dataloader_lengths.values())
-    dummy_optimizer = torch.optim.SGD([dummy_param], lr=1.0)
     
     
     print(f"Training info:")
@@ -353,8 +349,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=256, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
@@ -367,14 +363,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--kl_weight", type=float, default=0.05, help="KL weight - use kl_restart_period for annealing")
-    parser.add_argument("--kl_restart_epochs", type=float, default=1, help="Number of epochs for KL weight restarts (0 = no restarts, standard cosine annealing)")
-    parser.add_argument("--kl_restart_mult", type=float, default=0.5, help="Multiplier for KL weight restarts (T_mult parameter)")
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--kl_weight", type=float, default=0.1, help="KL weight - use kl_restart_period for annealing")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=32)
-    parser.add_argument("--n_dct_basis_fns", type=int, default=11)
+    parser.add_argument("--n_dct_basis_fns", type=int, default=12)
     parser.add_argument("--reward_type", type=str, default="five_goals")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
