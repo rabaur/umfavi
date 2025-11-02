@@ -106,6 +106,7 @@ def main(args):
         print()
     
     # Create datasets and dataloaders
+    datasets = {}
     dataloaders = {}
     
     if "preference" in active_feedback_types:
@@ -118,6 +119,7 @@ def main(args):
             act_transform=one_hot_encode_actions,
             rationality=args.pref_rationality,
         )
+        datasets["preference"] = pref_dataset
         dataloaders["preference"] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created preference dataset with {len(pref_dataset)} samples")
     
@@ -133,20 +135,14 @@ def main(args):
             gamma=args.gamma,
             td_error_weight=args.td_error_weight,
         )
+        datasets["demonstration"] = demo_dataset
         dataloaders["demonstration"] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
-    
-    print()
 
     # Visualize dataset visitation if requested
     if args.visualize_dataset:
         print("\nVisualizing state-action visitation distribution...")
-        datasets_dict = {}
-        if "preference" in active_feedback_types:
-            datasets_dict["preference"] = pref_dataset
-        if "demonstration" in active_feedback_types:
-            datasets_dict["demonstration"] = demo_dataset
-        visualize_state_action_visitation(env, datasets_dict, normalize=True)
+        visualize_state_action_visitation(env, datasets, normalize=True)
 
     # Create feature module and encoder
     obs_dim = env.observation_space["observation"].shape[0]
@@ -168,8 +164,6 @@ def main(args):
         decoders["demonstration"] = demonstration_decoder
         print("Created demonstration decoder")
     
-    print()
-    
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
         encoder=reward_encoder,
@@ -180,32 +174,26 @@ def main(args):
     # Watch model with wandb (log gradients and parameters)
     wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in dataloaders.items()}
-    batches_per_epoch = max(dataloader_lengths.values())
     
     
     print(f"Training info:")
     for fb_type, length in dataloader_lengths.items():
         print(f"  {fb_type}: {length} batches per epoch")
-    print(f"  Total update steps per epoch: {batches_per_epoch}")
     print(f"  Batches processed per update: {len(dataloaders)}")
-    print(f"\nKL Weight Annealing:")
-    print(f"  Target KL weight: ~1.0000 (annealing towards maximum)")
-    print()
+
+    dloader_iters = {k: iter(dataloaders[k]) for k in active_feedback_types}
+    total_data_len = sum(len(dset) for dset in datasets.values())
+    steps_per_epoch = total_data_len // args.batch_size
+    sampling_probs = [len(datasets[k]) / total_data_len for k in active_feedback_types]
 
     for epoch in range(args.num_epochs):
         
         # Training
         fb_model.train()
-        
-        # Create cyclic iterators for all active dataloaders
-        dataloader_iters = {
-            fb_type: itertools.cycle(dl) 
-            for fb_type, dl in dataloaders.items()
-        }
         
         # Track losses per feedback type
         total_loss = 0
@@ -213,78 +201,69 @@ def main(args):
         kl_div_sum = 0.0
         nll_sum = 0.0
         
-        for batch_idx in range(batches_per_epoch):
+        for step in range(steps_per_epoch):
+
+            fb_type = np.random.choice(list(active_feedback_types), p=sampling_probs)
+
+            try:
+                batch = next(dloader_iters[fb_type])
+            except StopIteration:
+                dloader_iters[fb_type] = iter(dataloaders[fb_type])
+                batch = next(dloader_iters[fb_type])
             
-            # Accumulate losses from all feedback types
-            batch_total_loss = 0
-            batch_kl_div = 0
-            batch_nll = 0
+            # Forward pass
+            loss_dict = fb_model(**batch)
+            loss = elbo_loss(
+                loss_dict["negative_log_likelihood"], 
+                loss_dict["kl_divergence"], 
+                kl_weight=args.kl_weight
+            )
             
-            for fb_type, data_iter in dataloader_iters.items():
-                # Get next batch for this feedback type
-                batch = next(data_iter)
-                
-                # Forward pass
-                loss_dict = fb_model(**batch)
-                loss = elbo_loss(
-                    loss_dict["negative_log_likelihood"], 
-                    loss_dict["kl_divergence"], 
-                    kl_weight=args.kl_weight
-                )
-                
-                # Accumulate gradients (don't step yet)
-                loss /= len(dataloaders) # normalize by the number of feedback types
-                loss.backward()
-                
-                # Track losses
-                loss_sums[fb_type] += loss.item()
-                batch_total_loss += loss.item()
-                batch_kl_div += loss_dict["kl_divergence"].item()
-                batch_nll += loss_dict["negative_log_likelihood"].item()
+            # Backpropagate
+            loss.backward()
             
             # Single optimizer step after processing all feedback types
             optimizer.step()
             optimizer.zero_grad()
+
+            # Track losses
+            loss_sums[fb_type] += loss.item()
             
-            total_loss += batch_total_loss
-            kl_div_sum += batch_kl_div
-            nll_sum += batch_nll
+            kl_div_sum += loss_dict["kl_divergence"].item()
+            nll_sum += loss_dict["negative_log_likelihood"].item()
             
             # Calculate global step for wandb logging
-            global_step = epoch * batches_per_epoch + batch_idx
+            global_step = epoch * steps_per_epoch + step
             
             # Log to wandb every batch
             wandb_log = {
-                "batch/loss": batch_total_loss,
-                "batch/kl_divergence": batch_kl_div,
-                "batch/negative_log_likelihood": batch_nll,
+                "batch/total_loss": loss.item(),
+                "batch/kl_divergence": loss_dict["kl_divergence"].item(),
+                "batch/negative_log_likelihood": loss_dict["negative_log_likelihood"].item(),
                 "batch/learning_rate": optimizer.param_groups[0]['lr'],
             }
-            # Log per-feedback-type losses
-            for fb_type in dataloaders.keys():
-                wandb_log[f"batch/loss_{fb_type}"] = loss_sums[fb_type] / (batch_idx + 1)
             wandb.log(wandb_log, step=global_step)
             
             # Log every few batches to console
-            if (batch_idx + 1) % max(1, batches_per_epoch // 10) == 0:
-                avg_kl = kl_div_sum / (batch_idx + 1)
-                avg_nll = nll_sum / (batch_idx + 1)
-                log_parts = [f"Epoch {epoch}, Batch {batch_idx + 1}/{batches_per_epoch}"]
+            if (step + 1) % max(1, steps_per_epoch // 10) == 0:
+                avg_kl = kl_div_sum / (step + 1)
+                avg_nll = nll_sum / (step + 1)
+                log_parts = [f"Epoch {epoch}, Batch {step + 1}/{steps_per_epoch}"]
                 for fb_type in sorted(dataloaders.keys()):
-                    avg_loss = loss_sums[fb_type] / (batch_idx + 1)
+                    avg_loss = loss_sums[fb_type] / (step + 1)
                     log_parts.append(f"{fb_type.capitalize()}: {avg_loss:.4f}")
                 log_parts.append(f"KL: {avg_kl:.4f}")
                 log_parts.append(f"NLL: {avg_nll:.4f}")
                 print(" - ".join(log_parts))
         
         # Epoch summary
-        avg_total_loss = total_loss / batches_per_epoch
-        avg_kl_div = kl_div_sum / batches_per_epoch
-        avg_nll = nll_sum / batches_per_epoch
+        avg_total_loss = total_loss / steps_per_epoch
+        avg_kl_div = kl_div_sum / steps_per_epoch
+        avg_nll = nll_sum / steps_per_epoch
         
         summary_parts = [f"\nEpoch {epoch} Summary - Total: {avg_total_loss:.4f}"]
         for fb_type in sorted(dataloaders.keys()):
-            avg_loss = loss_sums[fb_type] / batches_per_epoch
+            avg_loss = loss_sums[fb_type] / steps_per_epoch
             summary_parts.append(f"{fb_type.capitalize()}: {avg_loss:.4f}")
         summary_parts.append(f"KL: {avg_kl_div:.4f}")
         summary_parts.append(f"NLL: {avg_nll:.4f}")
@@ -330,11 +309,11 @@ def main(args):
             }
             # Log per-feedback-type epoch averages
             for fb_type in dataloaders.keys():
-                epoch_log[f"epoch/loss_{fb_type}"] = loss_sums[fb_type] / batches_per_epoch
+                epoch_log[f"epoch/loss_{fb_type}"] = loss_sums[fb_type] / steps_per_epoch
             wandb.log(epoch_log, step=global_step)
         
             # Evaluation
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 100 == 0:
                 with torch.no_grad():
                     visualize_rewards(env, one_hot_encode_actions, fb_model, device)
             
@@ -350,19 +329,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=1024, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
-    parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=1.0, help="Rationality for expert policy")
+    parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
+    parser.add_argument("--expert_rationality", type=float, default=2.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--kl_weight", type=float, default=0.1, help="KL weight - use kl_restart_period for annealing")
     
