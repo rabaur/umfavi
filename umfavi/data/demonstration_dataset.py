@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from umfavi.utils.gym import rollout, get_obs_act_pairs
+from umfavi.utils.gym import get_obs_states_acts, rollout
 
 class DemonstrationDataset(Dataset):
     """
@@ -47,8 +47,10 @@ class DemonstrationDataset(Dataset):
         self.rationality = rationality
         self.gamma = gamma
         # Generate demonstrations
-        self.obs_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
+        self.obs_seqs, self.states_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
         self.td_error_weight = td_error_weight
+
+
     def add_demonstrations(self, policy: Callable) -> None:
         """
         Add demonstrations to the dataset.
@@ -71,6 +73,7 @@ class DemonstrationDataset(Dataset):
             - acts_seqs: List of action sequences
         """
         obs_seqs = []
+        states_seqs = []
         acts_seqs = []
         
         for _ in range(self.n_samples):
@@ -78,7 +81,7 @@ class DemonstrationDataset(Dataset):
             trajectory = rollout(self.env, policy, n_steps=self.n_steps)
 
             # Extract state-action pairs from trajectory
-            obs, acts = get_obs_act_pairs(trajectory)
+            obs, states, acts = get_obs_states_acts(trajectory)
 
             # Transform observations and actions
             if self.obs_transform:
@@ -89,9 +92,10 @@ class DemonstrationDataset(Dataset):
 
             # Append the newly generated trajectory
             obs_seqs.append(obs)
+            states_seqs.append(states)
             acts_seqs.append(acts)
             
-        return obs_seqs, acts_seqs
+        return obs_seqs, states_seqs, acts_seqs
     
     def __len__(self):
         return self.n_samples
@@ -111,11 +115,12 @@ class DemonstrationDataset(Dataset):
             - targets: Same as acts (for consistency with other datasets)
         """
         obs = self.obs_seqs[idx]
+        states = self.states_seqs[idx]
         acts = self.acts_seqs[idx]
         
         # Convert observations to tensors
         obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
-        
+        states_tensor = torch.tensor(states, dtype=torch.float32).to(self.device)
         # Handle actions - if act_transform was applied, acts is a list of tensors
         if self.act_transform:
             # Stack the already transformed tensors
@@ -128,6 +133,7 @@ class DemonstrationDataset(Dataset):
         return {
             "feedback_type": "demonstration",
             "obs": obs_tensor,
+            "states": states_tensor,
             "acts": acts_tensor,
             "targets": acts_tensor,
             "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),

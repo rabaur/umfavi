@@ -1,6 +1,5 @@
 import argparse
 import torch
-import itertools
 import wandb
 import numpy as np
 from torch.utils.data import DataLoader
@@ -10,40 +9,51 @@ from umfavi.data.demonstration_dataset import DemonstrationDataset
 from umfavi.metrics.epic import evaluate_epic_distance
 from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import UniformPolicy, ExpertPolicy
+from umfavi.utils.policies import ExpertPolicy
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.features import MLPFeatureModule, QValueModel
 from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
-from umfavi.visualization.dct_grid_env_visualizer import visualize_rewards, visualize_state_action_visitation
+from umfavi.visualization.dct_grid_env_visualizer import (
+    visualize_rewards,
+    visualize_state_action_dist
+)
+
+def create_run_name(args):
+    run_name_parts = []
+    for key, value in args.__dict__.items():
+        if isinstance(value, int):
+            run_name_parts.append(f"{key}{value}")
+        elif isinstance(value, float):
+            run_name_parts.append(f"{key}{value:.2f}")
+        else:
+            run_name_parts.append(f"{key}{value}")
+    return "-".join(run_name_parts)
+
+
+# Define function that performs one-hot encoding of actions
+def one_hot_encode_actions(actions) -> torch.Tensor:
+    """Convert integer action to one-hot encoded tensor."""
+    if not isinstance(actions, torch.Tensor):
+        actions = torch.tensor(actions, dtype=torch.long)
+    return torch.nn.functional.one_hot(actions, num_classes=env.action_space.n).float()
 
 def main(args):
     
-    # Generate meaningful run name if not provided
-    if args.wandb_run_name is None:
-        # Create run name from environment and feedback configuration
-        run_name_parts = [args.reward_type]
-        
-        # Add feedback sample counts (only for active feedback types)
-        run_name_parts.append(f"pref{args.num_pref_samples}")
-        run_name_parts.append(f"demo{args.num_demo_samples}")
-        
-        # Add KL weight
-        run_name_parts.append(f"kl{args.kl_weight}")
-        
-        args.wandb_run_name = "-".join(run_name_parts)
+    args.wandb_run_name = create_run_name(args)
     
     # Initialize wandb
-    wandb.init(
-        project=args.wandb_project,
-        name=args.wandb_run_name,
-        config=vars(args),
-        tags=args.wandb_tags.split(",") if args.wandb_tags else None,
-    )
-    print(f"Wandb run: {wandb.run.name if wandb.run else 'N/A'}")
-    print(f"Wandb URL: {wandb.run.url if wandb.run else 'N/A'}\n")
+    if args.log_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name,
+            config=vars(args),
+            tags=args.wandb_tags.split(",") if args.wandb_tags else None,
+        )
+        print(f"Wandb run: {wandb.run.name if wandb.run else 'N/A'}")
+        print(f"Wandb URL: {wandb.run.url if wandb.run else 'N/A'}\n")
 
     env = DCTGridEnv(
         grid_size=args.grid_size,
@@ -54,14 +64,6 @@ def main(args):
 
     device = get_device()
     print(f"Using device: {device}")
-
-    
-    # Define function that performs one-hot encoding of actions
-    def one_hot_encode_actions(actions) -> torch.Tensor:
-        """Convert integer action to one-hot encoded tensor."""
-        if not isinstance(actions, torch.Tensor):
-            actions = torch.tensor(actions, dtype=torch.long)
-        return torch.nn.functional.one_hot(actions, num_classes=env.action_space.n).float()
         
     # Get all state-action features for evaluation
     n_states = env.S.shape[0]
@@ -91,7 +93,7 @@ def main(args):
     # Create policies (only if needed)
     policies_created = set()
 
-    preference_policy = ExpertPolicy(env=env, rationality=0.1, gamma=args.gamma)
+    preference_policy = ExpertPolicy(env=env, rationality=0.5, gamma=args.gamma)
     policies_created.add("preference")
     demonstration_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
     policies_created.add("demonstration")
@@ -140,9 +142,7 @@ def main(args):
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
 
     # Visualize dataset visitation if requested
-    if args.visualize_dataset:
-        print("\nVisualizing state-action visitation distribution...")
-        visualize_state_action_visitation(env, datasets, normalize=True)
+    visualize_state_action_dist(env, dataloaders["demonstration"])
 
     # Create feature module and encoder
     obs_dim = env.observation_space["observation"].shape[0]
@@ -172,7 +172,8 @@ def main(args):
     fb_model.to(device)
     
     # Watch model with wandb (log gradients and parameters)
-    wandb.watch(fb_model, log="all", log_freq=100)
+    if args.usewb:
+        wandb.watch(fb_model, log="all", log_freq=100)
 
     optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
 
@@ -242,7 +243,8 @@ def main(args):
                 "batch/negative_log_likelihood": loss_dict["negative_log_likelihood"].item(),
                 "batch/learning_rate": optimizer.param_groups[0]['lr'],
             }
-            wandb.log(wandb_log, step=global_step)
+            if args.usewb:
+                wandb.log(wandb_log, step=global_step)
             
             # Log every few batches to console
             if (step + 1) % max(1, steps_per_epoch // 10) == 0:
@@ -294,26 +296,27 @@ def main(args):
 
 
             # Log to wandb
-            wandb.log({
-                "eval/epic_distance": epic_dist,
-                "eval/expected_regret": regret,
-                "epoch": epoch,
-            })
+            if args.usewb:
+                wandb.log({
+                    "eval/epic_distance": epic_dist,
+                    "eval/expected_regret": regret,
+                    "epoch": epoch,
+                })
 
-            epoch_log = {
-                "epoch/loss": avg_total_loss,
-                "epoch/kl_divergence": avg_kl_div,
-                "epoch/negative_log_likelihood": avg_nll,
-                "epoch/learning_rate": optimizer.param_groups[0]['lr'],
-                "epoch": epoch,
-            }
-            # Log per-feedback-type epoch averages
-            for fb_type in dataloaders.keys():
-                epoch_log[f"epoch/loss_{fb_type}"] = loss_sums[fb_type] / steps_per_epoch
-            wandb.log(epoch_log, step=global_step)
+                epoch_log = {
+                    "epoch/loss": avg_total_loss,
+                    "epoch/kl_divergence": avg_kl_div,
+                    "epoch/negative_log_likelihood": avg_nll,
+                    "epoch/learning_rate": optimizer.param_groups[0]['lr'],
+                    "epoch": epoch,
+                }
+                # Log per-feedback-type epoch averages
+                for fb_type in dataloaders.keys():
+                    epoch_log[f"epoch/loss_{fb_type}"] = loss_sums[fb_type] / steps_per_epoch
+                wandb.log(epoch_log, step=global_step)
         
             # Evaluation
-            if (epoch + 1) % 100 == 0:
+            if (epoch + 1) % 10 == 0:
                 with torch.no_grad():
                     visualize_rewards(env, one_hot_encode_actions, fb_model, device)
             
@@ -328,33 +331,35 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=1024, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=1024, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=64, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=2.0, help="Rationality for expert policy")
-    parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
+    parser.add_argument("--expert_rationality", type=float, default=6.0, help="Rationality for expert policy")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--kl_weight", type=float, default=0.1, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--kl_weight", type=float, default=0.01, help="KL weight - use kl_restart_period for annealing")
     
     # Environment parameters
-    parser.add_argument("--grid_size", type=int, default=32)
+    parser.add_argument("--grid_size", type=int, default=16)
     parser.add_argument("--n_dct_basis_fns", type=int, default=12)
-    parser.add_argument("--reward_type", type=str, default="five_goals")
+    parser.add_argument("--reward_type", type=str, default="cliff")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")
     
     # Wandb parameters
+    parser.add_argument("--log_wandb", action="store_true", help="Log to weights and biases")
     parser.add_argument("--wandb_project", type=str, default="var-rew-learning", help="Wandb project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="Wandb run name (default: auto-generated)")
     parser.add_argument("--wandb_tags", type=str, default="", help="Comma-separated wandb tags")

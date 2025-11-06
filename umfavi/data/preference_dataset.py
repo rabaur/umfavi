@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from umfavi.utils.gym import rollout, get_obs_act_pairs, get_rewards
+from umfavi.utils.gym import rollout, get_obs_states_acts, get_rewards
 from umfavi.utils.math import sigmoid
 
 class PreferenceDataset(Dataset):
@@ -87,8 +87,8 @@ class PreferenceDataset(Dataset):
             traj2 = rollout(self.env, policy, n_steps=self.n_steps)
 
             # Extract state-action pairs from trajectories
-            obs1, acts1 = get_obs_act_pairs(traj1)
-            obs2, acts2 = get_obs_act_pairs(traj2)
+            obs1, states1, acts1 = get_obs_states_acts(traj1)
+            obs2, states2, acts2 = get_obs_states_acts(traj2)
 
             # Transform observations and actions
             if self.obs_transform:

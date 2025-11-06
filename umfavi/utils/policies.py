@@ -57,7 +57,7 @@ class ExpertPolicy:
             # Handle reset return format (obs, info)
             observation = observation[0]
         
-        coord = observation['coord']
+        coord = observation['state']
         state_idx = coord[0] * self.env.grid_size + coord[1]
         
         # Sample action from policy distribution

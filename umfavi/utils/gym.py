@@ -1,5 +1,5 @@
 import gymnasium as gym
-from typing import Callable
+from typing import Any, Callable
 
 def rollout(env: gym.Env, policy: Callable, n_steps: int) -> list[list[tuple[dict, int, bool, dict]]]:
     ep = []
@@ -16,13 +16,16 @@ def rollout(env: gym.Env, policy: Callable, n_steps: int) -> list[list[tuple[dic
         step += 1
     return ep
 
-def get_obs_act_pairs(trajectory: list[tuple[dict, int, bool, dict]]) -> list[tuple[int, int]]:
+def extract_obs_state_actions(
+    trajectory: list[tuple[dict, int, bool, dict]],
+) -> list[tuple[Any]]:
     """
     Get state-action pairs from a trajectory.
     """
     obs = [obs["observation"] for obs, _, _, _, _ in trajectory]
+    states = [state["state"] for state, _, _, _, _ in trajectory]
     acts = [act for _, act, _, _, _ in trajectory]
-    return obs, acts
+    return obs, states, acts
 
 def get_rewards(trajectory: list[tuple[dict, int, bool, dict]]) -> list[float]:
     """

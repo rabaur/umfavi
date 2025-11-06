@@ -51,6 +51,19 @@ def dct_features(grid_size: int, n_dct_basis_fns: int) -> np.ndarray:
     # stack into (N, N, K*K)
     return np.stack(feats, axis=-1)
 
+def coordinate_features(grid_size: int):
+    """
+    Creates coordinate features on an N×N grid scaled within [0,1]^2
+    """
+    N = grid_size
+
+    # grid coordinates
+    x = np.linspace(0, 1, N)
+    y = np.linspace(0, 1, N)
+    xv, yv = np.meshgrid(x, y, indexing='ij')
+    return np.stack([xv, yv], axis=-1)
+
+
 def custom_layout(G: nx.Graph, grid_size: int):
     """
     Maps state node names in the format r"$s_{i}$" to [x, y] coordinates.
@@ -310,7 +323,8 @@ def dct_grid_env(grid_size: int, n_dct_basis_fns: int, reward_type: str, p_rand:
     R = reward_factory(grid_size, reward_type)
 
     # Create state-feature matrix.
-    S_square = dct_features(grid_size, n_dct_basis_fns)
+    # S_square = dct_features(grid_size, n_dct_basis_fns)
+    S_square = coordinate_features(grid_size)
     S = S_square.reshape((grid_size ** 2, -1))
 
     return P, R, S
@@ -343,7 +357,7 @@ class DCTGridEnv(gym.Env):
 
         # Observation space
         self.observation_space = spaces.Dict({
-            "coord": spaces.Box(low=np.array([0,0]), high=np.array([grid_size-1, grid_size-1]), dtype=np.int32, shape=(2,)),
+            "state": spaces.Box(low=np.array([0,0]), high=np.array([grid_size-1, grid_size-1]), dtype=np.int32, shape=(2,)),
             "observation": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(self.S.shape[1],))
         })
         self.state_coord = None  # will hold (i,j)
@@ -351,13 +365,15 @@ class DCTGridEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        # Choose a random (i,j)
-        i = self.np_random.integers(self.grid_size)
-        j = self.np_random.integers(self.grid_size)
+        # # Choose a random (i,j)
+        # i = self.np_random.integers(self.grid_size)
+        # j = self.np_random.integers(self.grid_size)
+        i = 0
+        j = 0
         self.state_coord = (i, j)
         self.state_idx = i * self.grid_size + j
         features = self.S[self.state_idx].astype(np.float32)
-        obs = {"coord": np.array(self.state_coord, dtype=np.int32),
+        obs = {"state": np.array(self.state_coord, dtype=np.int32),
                "observation": features}
         info = {}
         return obs, info
@@ -373,7 +389,7 @@ class DCTGridEnv(gym.Env):
         terminated = False
         truncated = False
         info = {}
-        obs = {"coord": np.array(self.state_coord, dtype=np.int32),
+        obs = {"state": np.array(self.state_coord, dtype=np.int32),
                "observation": features}
         return obs, reward, terminated, truncated, info
 
