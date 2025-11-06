@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from umfavi.utils.gym import rollout, get_obs_states_acts, get_rewards
+from umfavi.utils.gym import rollout, extract_obs_state_actions, get_rewards
 from umfavi.utils.math import sigmoid
 
 class PreferenceDataset(Dataset):
@@ -40,7 +40,7 @@ class PreferenceDataset(Dataset):
         self.device = device
 
         # Generate trajectory pairs and preferences
-        self.obs_seq_pairs, self.acts_seq_pairs, self.preferences = self.generate_preferences(policy=policy)
+        self.obs_seq_pairs, self.state_seq_pairs, self.acts_seq_pairs, self.preferences = self.generate_preferences(policy=policy)
         
     def _compute_trajectory_return(self, trajectory: list[tuple[int, int, float]]) -> float:
         """
@@ -54,19 +54,6 @@ class PreferenceDataset(Dataset):
         """
         return sum(reward for _, _, reward in trajectory)
     
-    def add_preferences(self, policy: Callable) -> None:
-        """
-        Add preferences to the dataset.
-        """
-        obs_seq_pairs, acts_seq_pairs, new_preferences = self.generate_preferences(policy)
-        if self.obs_seq_pairs is None:
-            self.obs_seq_pairs, self.acts_seq_pairs, self.preferences = obs_seq_pairs, acts_seq_pairs, new_preferences
-        else:
-            self.obs_seq_pairs.extend(obs_seq_pairs)
-            self.acts_seq_pairs.extend(acts_seq_pairs)
-            self.preferences.extend(new_preferences)
-        self.n_samples = len(self.preferences)
-    
     def generate_preferences(self, policy: Callable) -> tuple[list[list[dict]], list[list[dict]], list[int]]:
         """
         Generate trajectory pairs and preferences.
@@ -77,18 +64,20 @@ class PreferenceDataset(Dataset):
             - preferences: List of preferences (0 for traj1, 1 for traj2)
         """
         obs_seq_pairs = []
+        state_seq_pairs = []
         acts_seq_pairs = []
         preferences = []
         
         for _ in range(self.n_samples):
 
             # Generate two trajectories using imported function
-            traj1 = rollout(self.env, policy, n_steps=self.n_steps)
-            traj2 = rollout(self.env, policy, n_steps=self.n_steps)
+            # Add one step in case next_obs (next_state) are needed
+            traj1 = rollout(self.env, policy, n_steps=self.n_steps + 1)
+            traj2 = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectories
-            obs1, states1, acts1 = get_obs_states_acts(traj1)
-            obs2, states2, acts2 = get_obs_states_acts(traj2)
+            obs1, states1, acts1 = extract_obs_state_actions(traj1)
+            obs2, states2, acts2 = extract_obs_state_actions(traj2)
 
             # Transform observations and actions
             if self.obs_transform:
@@ -111,23 +100,29 @@ class PreferenceDataset(Dataset):
             
             # Append the newly generated trajectories
             obs_seq_pairs.append((obs1, obs2))
+            state_seq_pairs.append((states1, states2))
             acts_seq_pairs.append((acts1, acts2))
             preferences.append(pref)
             
-        return obs_seq_pairs, acts_seq_pairs, preferences
+        return obs_seq_pairs, state_seq_pairs, acts_seq_pairs, preferences
     
     def __len__(self):
         return self.n_samples
     
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         obs1, obs2 = self.obs_seq_pairs[idx]
+        states1, states2 = self.state_seq_pairs[idx]
         acts1, acts2 = self.acts_seq_pairs[idx]
         preference = self.preferences[idx]
         
         # Convert observations to tensors
         obs1_tensor = torch.tensor(obs1, dtype=torch.float32).to(self.device)
         obs2_tensor = torch.tensor(obs2, dtype=torch.float32).to(self.device)
-        
+
+        # Convert states to tensors
+        states1_tensor = torch.tensor(states1, dtype=torch.int32).to(self.device)
+        states2_tensor = torch.tensor(states2, dtype=torch.int32).to(self.device)
+
         # Handle actions - if act_transform was applied, acts1/acts2 are lists of tensors
         if self.act_transform:
             # Stack the already transformed tensors
@@ -139,22 +134,19 @@ class PreferenceDataset(Dataset):
             acts2_tensor = torch.tensor(acts2, dtype=torch.float32).to(self.device)
         
         # Concatenate obs and acts for easier handling
-        obs_tensor = torch.stack([obs1_tensor, obs2_tensor], dim=0)
+        obs_tensor = torch.stack([obs1_tensor[:-1], obs2_tensor[:-1]], dim=0)
+        next_obs_tensor = torch.stack([obs1_tensor[1:], obs2_tensor[1:]], dim=0)
+        state_tensor = torch.stack([states1_tensor[:-1], states2_tensor[:-1]], dim=0)
+        next_state_tensor = torch.stack([states1_tensor[1:], states2_tensor[1:]], dim=0)
         acts_tensor = torch.stack([acts1_tensor, acts2_tensor], dim=0)
         preference = torch.tensor(preference, dtype=torch.float32).unsqueeze(0).to(self.device)
         return {
             "feedback_type": "preference",
             "obs": obs_tensor,
+            "next_obs": next_obs_tensor,
+            "states": state_tensor,
+            "next_states": next_state_tensor,
             "acts": acts_tensor,
             "targets": preference.squeeze(),
             "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
         }
-    
-    def get_all_data(self):
-        """
-        Get all trajectory pairs and preferences as numpy arrays.
-        
-        Returns:
-            Tuple of (trajectory_pairs, preferences) as numpy arrays
-        """
-        return self.trajectory_pairs, np.array(self.preferences)

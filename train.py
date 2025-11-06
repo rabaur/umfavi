@@ -34,11 +34,11 @@ def create_run_name(args):
 
 
 # Define function that performs one-hot encoding of actions
-def one_hot_encode_actions(actions) -> torch.Tensor:
+def one_hot_encode_actions(actions, n_actions: int) -> torch.Tensor:
     """Convert integer action to one-hot encoded tensor."""
     if not isinstance(actions, torch.Tensor):
         actions = torch.tensor(actions, dtype=torch.long)
-    return torch.nn.functional.one_hot(actions, num_classes=env.action_space.n).float()
+    return torch.nn.functional.one_hot(actions, num_classes=n_actions).float()
 
 def main(args):
     
@@ -71,7 +71,7 @@ def main(args):
     state_feats_flat = torch.tensor(env.S, dtype=torch.float32).to(device=device)
     action_feats = torch.zeros((n_actions, n_actions), dtype=torch.float32).to(device=device)
     for a in range(n_actions):
-        action_feats[a, :] = one_hot_encode_actions(a)
+        action_feats[a, :] = one_hot_encode_actions(a, env.action_space.n)
 
     # Register feedback types and their sample counts
     feedback_config = {
@@ -97,15 +97,6 @@ def main(args):
     policies_created.add("preference")
     demonstration_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
     policies_created.add("demonstration")
-    
-    # Test policies if created
-    if policies_created:
-        print("Testing policies...")
-        if "preference" in policies_created:
-            print(f"Preference policy action: {preference_policy(env.reset())}")
-        if "demonstration" in policies_created:
-            print(f"Demonstration policy action: {demonstration_policy(env.reset())}")
-        print()
     
     # Create datasets and dataloaders
     datasets = {}
@@ -147,7 +138,9 @@ def main(args):
     # Create feature module and encoder
     obs_dim = env.observation_space["observation"].shape[0]
     act_dim = env.action_space.n
-    feature_module = MLPFeatureModule(obs_dim, act_dim, [128, 128])
+    feature_module = MLPFeatureModule(
+        obs_dim, act_dim, [128, 128], reward_domain=args.reward_domain
+    )
     reward_encoder = RewardEncoder(feature_module)
 
     # Create decoders only for active feedback types

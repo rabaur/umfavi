@@ -16,6 +16,7 @@ class DemonstrationDataset(Dataset):
         n_steps: int,
         policy: Callable,
         env: gym.Env,
+        reward_domain: str,
         device: str,
         obs_transform: Callable = None,
         act_transform: Callable = None,
@@ -78,7 +79,8 @@ class DemonstrationDataset(Dataset):
         
         for _ in range(self.n_samples):
             # Generate trajectory using the expert policy
-            trajectory = rollout(self.env, policy, n_steps=self.n_steps)
+            # Add one extra step to the trajectory to get the next observation
+            trajectory = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectory
             obs, states, acts = get_obs_states_acts(trajectory)
@@ -114,13 +116,20 @@ class DemonstrationDataset(Dataset):
             - acts: Action sequence tensor (targets for behavioral cloning)
             - targets: Same as acts (for consistency with other datasets)
         """
-        obs = self.obs_seqs[idx]
-        states = self.states_seqs[idx]
-        acts = self.acts_seqs[idx]
+
+        # Get the demonstration sequence
+        obs = self.obs_seqs[idx][:-1]
+        next_obs = self.obs_seqs[idx][1:]
+        states = self.states_seqs[idx][:-1]
+        next_states = self.states_seqs[idx][1:]
+        acts = self.acts_seqs[idx][:-1]
         
         # Convert observations to tensors
         obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
+        next_obs_tensor = torch.tensor(next_obs, dtype=torch.float32).to(self.device)
         states_tensor = torch.tensor(states, dtype=torch.float32).to(self.device)
+        next_states_tensor = torch.tensor(next_states, dtype=torch.float32).to(self.device)
+
         # Handle actions - if act_transform was applied, acts is a list of tensors
         if self.act_transform:
             # Stack the already transformed tensors
@@ -128,12 +137,13 @@ class DemonstrationDataset(Dataset):
         else:
             # Convert to tensor if no transformation was applied
             acts_tensor = torch.tensor(acts, dtype=torch.float32).to(self.device)
-        acts_tensor = acts_tensor
         
         return {
             "feedback_type": "demonstration",
             "obs": obs_tensor,
+            "next_obs": next_obs_tensor,
             "states": states_tensor,
+            "next_states": next_states_tensor,
             "acts": acts_tensor,
             "targets": acts_tensor,
             "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),

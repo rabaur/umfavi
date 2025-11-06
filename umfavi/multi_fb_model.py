@@ -14,8 +14,9 @@ class MultiFeedbackTypeModel(nn.Module):
 
         # Encode
         obs = kwargs["obs"]
-        acts = kwargs["acts"]
-        mean, log_var = self.encoder(obs, acts)
+        acts = kwargs.get("acts", None)
+        next_obs = kwargs.get("next_obs", None)
+        mean, log_var = self.encoder(obs, acts, next_obs)
         r_samples = self.encoder.sample(mean, log_var)
         kl_div = kl_divergence_std_normal(mean, log_var)
 
