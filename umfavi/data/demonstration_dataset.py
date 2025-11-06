@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable
 import gymnasium as gym
-from umfavi.utils.gym import get_obs_states_acts, rollout
+from umfavi.utils.gym import extract_obs_state_actions, rollout
 
 class DemonstrationDataset(Dataset):
     """
@@ -16,7 +16,6 @@ class DemonstrationDataset(Dataset):
         n_steps: int,
         policy: Callable,
         env: gym.Env,
-        reward_domain: str,
         device: str,
         obs_transform: Callable = None,
         act_transform: Callable = None,
@@ -83,7 +82,7 @@ class DemonstrationDataset(Dataset):
             trajectory = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectory
-            obs, states, acts = get_obs_states_acts(trajectory)
+            obs, states, acts = extract_obs_state_actions(trajectory)
 
             # Transform observations and actions
             if self.obs_transform:

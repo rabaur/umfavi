@@ -89,13 +89,13 @@ def visualize_rewards(
         
         # Convert action to features
         a = act.value
-        a_feat = act_transform(a)
+        a_feat = act_transform(a, n_actions=n_actions)
 
         # Repeat to match features
         a_feat_reps = torch.tile(torch.tensor(a_feat, dtype=torch.float32).to(device), (grid_size**2, 1))
 
         # Predict mean and logvar
-        mean, log_var = fb_model.encoder(state_feats_flat, a_feat_reps)
+        mean, log_var = fb_model.encoder(state_feats_flat, a_feat_reps, state_feats_flat)
 
         # Reshape the mean and the logvar
         mean = np.array(mean.detach().cpu())

@@ -101,6 +101,8 @@ def main(args):
     # Create datasets and dataloaders
     datasets = {}
     dataloaders = {}
+
+    act_transform = lambda a: one_hot_encode_actions(a, n_actions=n_actions)
     
     if "preference" in active_feedback_types:
         pref_dataset = PreferenceDataset(
@@ -109,7 +111,7 @@ def main(args):
             env=env,
             policy=preference_policy,
             device=device,
-            act_transform=one_hot_encode_actions,
+            act_transform=act_transform,
             rationality=args.pref_rationality,
         )
         datasets["preference"] = pref_dataset
@@ -123,7 +125,7 @@ def main(args):
             env=env,
             policy=demonstration_policy,
             device=device,
-            act_transform=one_hot_encode_actions,
+            act_transform=act_transform,
             rationality=args.expert_rationality,
             gamma=args.gamma,
             td_error_weight=args.td_error_weight,
@@ -139,7 +141,7 @@ def main(args):
     obs_dim = env.observation_space["observation"].shape[0]
     act_dim = env.action_space.n
     feature_module = MLPFeatureModule(
-        obs_dim, act_dim, [128, 128], reward_domain=args.reward_domain
+        obs_dim, act_dim, [128, 128, 128], reward_domain=args.reward_domain
     )
     reward_encoder = RewardEncoder(feature_module)
 
@@ -165,7 +167,7 @@ def main(args):
     fb_model.to(device)
     
     # Watch model with wandb (log gradients and parameters)
-    if args.usewb:
+    if args.log_wandb:
         wandb.watch(fb_model, log="all", log_freq=100)
 
     optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
@@ -236,7 +238,7 @@ def main(args):
                 "batch/negative_log_likelihood": loss_dict["negative_log_likelihood"].item(),
                 "batch/learning_rate": optimizer.param_groups[0]['lr'],
             }
-            if args.usewb:
+            if args.log_wandb:
                 wandb.log(wandb_log, step=global_step)
             
             # Log every few batches to console
@@ -275,7 +277,7 @@ def main(args):
                 R_est = np.empty((n_states, n_actions))
                 for a in range(n_actions):
                     a_feats_repped = action_feats[a, :].repeat(n_states, 1)
-                    R_mean_a, _ = fb_model.encoder(state_feats_flat, a_feats_repped)
+                    R_mean_a, _ = fb_model.encoder(state_feats_flat, a_feats_repped, state_feats_flat)
                     R_est[:, a] = to_numpy(R_mean_a).squeeze()
 
                 # Compute epic distance
@@ -289,7 +291,7 @@ def main(args):
 
 
             # Log to wandb
-            if args.usewb:
+            if args.log_wandb:
                 wandb.log({
                     "eval/epic_distance": epic_dist,
                     "eval/expected_regret": regret,
@@ -324,9 +326,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=64, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
     parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
-    parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
+    parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
@@ -345,7 +347,7 @@ if __name__ == "__main__":
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=16)
     parser.add_argument("--n_dct_basis_fns", type=int, default=12)
-    parser.add_argument("--reward_type", type=str, default="cliff")
+    parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     
     # Visualization parameters
