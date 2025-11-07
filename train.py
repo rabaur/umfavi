@@ -57,7 +57,6 @@ def main(args):
 
     env = DCTGridEnv(
         grid_size=args.grid_size,
-        n_dct_basis_fns=args.n_dct_basis_fns,
         reward_type=args.reward_type,
         p_rand=args.p_rand,
     )
@@ -154,7 +153,7 @@ def main(args):
         print("Created preference decoder")
     
     if "demonstration" in active_feedback_types:
-        q_value_model = QValueModel(obs_dim, [128, 128, act_dim])
+        q_value_model = QValueModel(obs_dim, [128, 128, 128, act_dim])
         demonstration_decoder = DemonstrationsDecoder(q_value_model)
         decoders["demonstration"] = demonstration_decoder
         print("Created demonstration decoder")
@@ -311,7 +310,7 @@ def main(args):
                 wandb.log(epoch_log, step=global_step)
         
             # Evaluation
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 100 == 0:
                 with torch.no_grad():
                     visualize_rewards(env, one_hot_encode_actions, fb_model, device)
             
@@ -330,19 +329,19 @@ if __name__ == "__main__":
     parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
-    parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
+    parser.add_argument("--td_error_weight", type=float, default=10.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=6.0, help="Rationality for expert policy")
+    parser.add_argument("--expert_rationality", type=float, default=10.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--kl_weight", type=float, default=0.01, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--kl_weight", type=float, default=0.1, help="KL weight - use kl_restart_period for annealing")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=16)

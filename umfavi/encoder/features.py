@@ -56,10 +56,10 @@ class QValueModel(nn.Module):
         for i in range(len(hidden_sizes) - 1):
             layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
             if i < len(hidden_sizes) - 2:
-                layers.append(nn.SiLU())
+                layers.append(nn.LeakyReLU())
             else:
                 layers.append(nn.Identity())
-        self.features = nn.Sequential(*layers)
+        self.Q_value_model = nn.Sequential(*layers)
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.features(obs)
+        return self.Q_value_model(obs)
