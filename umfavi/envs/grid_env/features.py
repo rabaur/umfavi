@@ -11,8 +11,17 @@ def feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: int, **k
     elif feature_type == "dct":
         n_dct_basis_fns = kwargs.get("n_dct_basis_fns", 8)
         return dct_features(grid_size, n_dct_basis_fns)
+    elif feature_type == "embedding":
+        return embedding_pre_features(grid_size)
     else:
         raise ValueError(f"Invalid feature type: {feature_type}")
+
+
+def embedding_pre_features(grid_size: int) -> np.ndarray:
+    """
+    When features are learned via embedding, we simply pass the state index as the feature.
+    """
+    return np.arange(grid_size ** 2).unsqueeze(-1)
 
 def one_hot_features(grid_size: int) -> np.ndarray:
     """

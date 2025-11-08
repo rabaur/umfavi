@@ -11,7 +11,7 @@ from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import ExpertPolicy
 from umfavi.encoder.reward_encoder import RewardEncoder
-from umfavi.encoder.features import MLPFeatureModule, QValueModel
+from umfavi.encoder.features import MLPFeatureModule
 from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.torch import get_device, to_numpy
@@ -19,7 +19,6 @@ from umfavi.losses import elbo_loss
 from umfavi.visualization.dct_grid_env_visualizer import (
     visualize_rewards,
     visualize_state_action_dist,
-    visualize_batch
 )
 
 def create_run_name(args):
@@ -156,7 +155,14 @@ def main(args):
         print("Created preference decoder")
     
     if "demonstration" in active_feedback_types:
-        q_value_model = QValueModel(obs_dim, args.q_value_hidden_sizes + [act_dim])
+        # Q-value model is just MLPFeatureModule with reward_domain='s' and last layer = n_actions
+        q_value_model = MLPFeatureModule(
+            state_dim=obs_dim,
+            action_dim=act_dim,  # Not used since reward_domain='s'
+            hidden_sizes=args.q_value_hidden_sizes + [act_dim],
+            reward_domain='s',
+            activate_last_layer=False
+        )
         demonstration_decoder = DemonstrationsDecoder(q_value_model)
         decoders["demonstration"] = demonstration_decoder
         print("Created demonstration decoder")
@@ -355,7 +361,7 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=16)
     parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one-hot, continuous_coordinate, dct)")
+    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one-hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
     
     # Visualization parameters
