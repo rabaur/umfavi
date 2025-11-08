@@ -17,8 +17,7 @@ from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
 from umfavi.visualization.dct_grid_env_visualizer import (
-    visualize_rewards,
-    visualize_state_action_dist,
+    visualize_rewards
 )
 
 def create_run_name(args):
@@ -32,13 +31,6 @@ def create_run_name(args):
             run_name_parts.append(f"{key}{value}")
     return "-".join(run_name_parts)
 
-
-# Define function that performs one-hot encoding of actions
-def one_hot_encode_actions(actions, n_actions: int) -> torch.Tensor:
-    """Convert integer action to one-hot encoded tensor."""
-    if not isinstance(actions, torch.Tensor):
-        actions = torch.tensor(actions, dtype=torch.long)
-    return torch.nn.functional.one_hot(actions, num_classes=n_actions).float()
 
 def main(args):
     
@@ -135,14 +127,19 @@ def main(args):
         dataloaders["demonstration"] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
 
-    # Visualize dataset visitation if requested
-    visualize_state_action_dist(env, dataloaders["demonstration"])
-
     # Create feature module and encoder
     obs_dim = env.observation_space["observation"].shape[0]
     act_dim = env.action_space.n
     feature_module = MLPFeatureModule(
-        obs_dim, act_dim, args.encoder_hidden_sizes, reward_domain=args.reward_domain
+        obs_dim,
+        act_dim,
+        args.encoder_hidden_sizes,
+        reward_domain=args.reward_domain,
+        learn_embedding=args.state_feature_type == "embedding",
+        state_embedding_size=args.state_feature_size,
+        action_embedding_size=args.action_feature_size,
+        n_actions=n_actions,
+        n_states=n_states
     )
     reward_encoder = RewardEncoder(feature_module)
 
@@ -361,8 +358,11 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=16)
     parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one-hot, continuous_coordinate, dct, embedding)")
+    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
+    parser.add_argument("--state_embedding_size", type=int, default=128, help="Only used if state_feature_type=='embedding'")
+    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot, embedding)")
+    parser.add_argument("--action_embedding_size", type=int, default=16, help="Only used if state_feature_type=='embedding")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")

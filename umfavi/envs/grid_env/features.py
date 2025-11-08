@@ -21,7 +21,7 @@ def embedding_pre_features(grid_size: int) -> np.ndarray:
     """
     When features are learned via embedding, we simply pass the state index as the feature.
     """
-    return np.arange(grid_size ** 2).unsqueeze(-1)
+    return np.arange(grid_size ** 2, dtype=np.int32)[:, None]
 
 def one_hot_features(grid_size: int) -> np.ndarray:
     """

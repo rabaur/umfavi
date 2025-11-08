@@ -124,10 +124,10 @@ class DemonstrationDataset(Dataset):
         acts = self.acts_seqs[idx][:-1]
         
         # Convert observations to tensors
-        obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
-        next_obs_tensor = torch.tensor(next_obs, dtype=torch.float32).to(self.device)
-        states_tensor = torch.tensor(states, dtype=torch.float32).to(self.device)
-        next_states_tensor = torch.tensor(next_states, dtype=torch.float32).to(self.device)
+        obs_tensor = torch.tensor(obs).to(self.device)
+        next_obs_tensor = torch.tensor(next_obs).to(self.device)
+        states_tensor = torch.tensor(states).to(self.device)
+        next_states_tensor = torch.tensor(next_states).to(self.device)
 
         # Handle actions - if act_transform was applied, acts is a list of tensors
         if self.act_transform:
@@ -135,7 +135,7 @@ class DemonstrationDataset(Dataset):
             acts_tensor = torch.stack(acts).to(self.device)
         else:
             # Convert to tensor if no transformation was applied
-            acts_tensor = torch.tensor(acts, dtype=torch.float32).to(self.device)
+            acts_tensor = torch.tensor(acts).to(self.device)
         
         return {
             "feedback_type": "demonstration",
