@@ -24,8 +24,8 @@ class MultiFeedbackTypeModel(nn.Module):
         head = self.decoders[kwargs["feedback_type"][0]]  # we can assume that all feedback types are the same per batch
         
         # Add reward mean and log_var to kwargs for decoders that need them
-        kwargs["reward_mean"] = mean
-        kwargs["reward_log_var"] = log_var
+        kwargs["reward_mean"] = mean.squeeze(-1)
+        kwargs["reward_log_var"] = log_var.squeeze(-1)
         
         nll = head(r_samples, **kwargs)
 

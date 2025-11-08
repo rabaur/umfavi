@@ -3,13 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Callable
 from vsup import VSUP
-from umfavi.envs.dct_grid_env import DCTGridEnv, Action
+from umfavi.envs.grid_env.env import GridEnv
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.math import log_var_to_std
 from umfavi.metrics.epic import canonically_shaped_reward
 from umfavi.utils.reward import Rsa_to_Rsas
-from umfavi.data.demonstration_dataset import DemonstrationDataset
-from umfavi.data.preference_dataset import PreferenceDataset
+from umfavi.envs.grid_env.actions import Action
 from torch.utils.data import DataLoader
 
 from umfavi.utils.torch import to_numpy
@@ -24,25 +23,29 @@ ACTION_SYMBOLS = {
 }
 
 def visualize_state_action_dist(
-    env: DCTGridEnv,
+    env: GridEnv,
     dataloader: DataLoader
 ):
     N = env.grid_size
-    counts = np.zeros((N, N))
     for batch in dataloader:
-        states = batch["states"]
-        for traj in states:
-            for cell in traj:
-                cell = to_numpy(cell)
-                i, j = int(cell[0]), int(cell[1])
-                counts[i, j] += 1
+        visualize_batch(batch, N)
+
+def visualize_batch(batch: dict, N: int):
+    counts = np.zeros((N, N))
+    states = batch["states"]
+    for traj in states:
+        for cell in traj:
+            cell = to_numpy(cell)
+            i, j = int(cell[0]), int(cell[1])
+            counts[i, j] += 1 
+    counts = np.log(counts + 1)
     fig, ax = plt.subplots(1, 1)
     ax.imshow(counts)
     plt.show()
 
 
 def visualize_rewards(
-    env: DCTGridEnv,
+    env: GridEnv,
     act_transform: Callable,
     fb_model: MultiFeedbackTypeModel,
     device: torch.device,
@@ -166,8 +169,6 @@ def visualize_rewards(
         axs[row_idx, 2].imshow(canon_grid, cmap="viridis", vmin=vmin_canon, vmax=vmax_canon)
         
         # Set row label (action symbol) on the leftmost subplot
-        action_enum = Action(a)
-        print(f"Action {a} ({action_enum}) symbol: {ACTION_SYMBOLS[a]}")
         axs[a, 0].set_ylabel(
             f"{ACTION_SYMBOLS[a]}",
             fontsize=16,

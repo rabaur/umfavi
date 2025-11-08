@@ -1,8 +1,8 @@
 import gymnasium as gym
 import numpy as np
-from umfavi.envs.dct_grid_env import DCTGridEnv
 from umfavi.utils.tabular import q_opt
 from umfavi.utils.math import softmax
+from umfavi.envs.grid_env.env import GridEnv
 
 class UniformPolicy:
     """
@@ -18,16 +18,16 @@ class UniformPolicy:
 
 class ExpertPolicy:
     """
-    Expert policy for DCTGridEnv based on optimal Q-values.
+    Expert policy for GridEnv based on optimal Q-values.
     Uses softmax over Q-values: π(a|s) = exp(β*Q(s,a)) / Σ_a' exp(β*Q(s,a'))
     """
 
-    def __init__(self, env: DCTGridEnv, rationality: float = 1.0, gamma: float = 0.99):
+    def __init__(self, env: GridEnv, rationality: float = 1.0, gamma: float = 0.99):
         """
         Initialize expert policy.
         
         Args:
-            env: DCTGridEnv environment
+            env: GridEnv environment
             rationality: Rationality parameter (β) for softmax policy
             gamma: Discount factor for Q-value computation
         """

@@ -16,7 +16,7 @@ def reward_sparse(grid_size: int, goal_state_offset: int = 2) -> np.ndarray:
     """
     n_S = grid_size ** 2
     n_A = 5
-    R = np.zeros((n_S, n_A))
+    R = np.full((n_S, n_A), -0.1)
     s_goal_idx = (grid_size - goal_state_offset) * grid_size + (grid_size - goal_state_offset)
 
     # All actions in the goal state have reward 1

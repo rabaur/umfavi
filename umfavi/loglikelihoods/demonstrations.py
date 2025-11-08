@@ -44,17 +44,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         gamma = kwargs["gamma"][0].item()
         td_error_weight = kwargs["td_error_weight"][0].item()
 
-        # Get obs shape for reshaping
-        batch_size, num_steps, obs_dim = obs.shape
-        
-        # Flatten obs to (batch_size * num_steps, obs_dim) for Q-value model
-        obs_flat = obs.reshape(batch_size * num_steps, obs_dim)
-        
         # Get the Q-value estimates
-        q_values_flat = self.Q_value_model(obs_flat)  # (batch_size * num_steps, n_actions)
-        
-        # Reshape back to (batch_size, num_steps, n_actions)
-        q_values = q_values_flat.reshape(batch_size, num_steps, -1)
+        q_values = self.Q_value_model(obs)  # (batch_size, num_steps, n_actions)
 
         # ------------------------------------------------------------------------------------------------
         # TD-error constraint
@@ -63,28 +54,26 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s_t, a_t) - γ * Q(s', a')]
         
         # Get action indices
-        act_integer = torch.argmax(acts, dim=-1).unsqueeze(-1)  # (batch_size, num_steps, 1)
+        act_integer = torch.argmax(acts, dim=-1)  # (batch_size, num_steps)
         act_integer_curr = act_integer[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
         act_integer_next = act_integer[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
         
         # Select Q(s_t, a_t) for current state-action pairs
-        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr)  # (batch_size, num_steps - 1)
+        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
         
         # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
-        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next)  # (batch_size, num_steps - 1, n_actions)
+        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
         
         # Compute TD-error (which should equal the reward)
-        td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1)
+        td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1, 1)
+        td_error_selected = td_error_selected.squeeze(-1)  # (batch_size, num_steps - 1)
 
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
-        reward_means_sliced = reward_means[:, :-1, :]  # (batch_size, num_steps - 1)
-        reward_log_vars_sliced = reward_log_vars[:, :-1, :]  # (batch_size, num_steps - 1)
+        reward_means_sliced = reward_means[:, :-1]  # (batch_size, num_steps - 1)
+        reward_log_vars_sliced = reward_log_vars[:, :-1]  # (batch_size, num_steps - 1)
         reward_vars_sliced = reward_log_vars_sliced.exp()
 
-        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced)
-
-        # Sum over all timesteps and then average over batches
-        td_error_nll = td_error_nll.sum()
+        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').sum(-1).mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -95,6 +84,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='sum')
+        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='none').sum(-1).mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight

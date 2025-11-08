@@ -3,7 +3,7 @@ import torch
 import wandb
 import numpy as np
 from torch.utils.data import DataLoader
-from umfavi.envs.dct_grid_env import DCTGridEnv
+from umfavi.envs.grid_env.env import GridEnv
 from umfavi.data.preference_dataset import PreferenceDataset
 from umfavi.data.demonstration_dataset import DemonstrationDataset
 from umfavi.metrics.epic import evaluate_epic_distance
@@ -18,7 +18,8 @@ from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
 from umfavi.visualization.dct_grid_env_visualizer import (
     visualize_rewards,
-    visualize_state_action_dist
+    visualize_state_action_dist,
+    visualize_batch
 )
 
 def create_run_name(args):
@@ -55,10 +56,12 @@ def main(args):
         print(f"Wandb run: {wandb.run.name if wandb.run else 'N/A'}")
         print(f"Wandb URL: {wandb.run.url if wandb.run else 'N/A'}\n")
 
-    env = DCTGridEnv(
+    env = GridEnv(
         grid_size=args.grid_size,
         reward_type=args.reward_type,
         p_rand=args.p_rand,
+        feature_type=args.state_feature_type,
+        **{"n_dct_basis_fns": args.n_dct_basis_fns},
     )
 
     device = get_device()
@@ -140,7 +143,7 @@ def main(args):
     obs_dim = env.observation_space["observation"].shape[0]
     act_dim = env.action_space.n
     feature_module = MLPFeatureModule(
-        obs_dim, act_dim, [128, 128, 128], reward_domain=args.reward_domain
+        obs_dim, act_dim, args.encoder_hidden_sizes, reward_domain=args.reward_domain
     )
     reward_encoder = RewardEncoder(feature_module)
 
@@ -153,7 +156,7 @@ def main(args):
         print("Created preference decoder")
     
     if "demonstration" in active_feedback_types:
-        q_value_model = QValueModel(obs_dim, [128, 128, 128, act_dim])
+        q_value_model = QValueModel(obs_dim, args.q_value_hidden_sizes + [act_dim])
         demonstration_decoder = DemonstrationsDecoder(q_value_model)
         decoders["demonstration"] = demonstration_decoder
         print("Created demonstration decoder")
@@ -169,7 +172,7 @@ def main(args):
     if args.log_wandb:
         wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in dataloaders.items()}
@@ -205,6 +208,8 @@ def main(args):
             except StopIteration:
                 dloader_iters[fb_type] = iter(dataloaders[fb_type])
                 batch = next(dloader_iters[fb_type])
+            
+            # visualize_batch(batch, env.grid_size)
             
             # Forward pass
             loss_dict = fb_model(**batch)
@@ -310,7 +315,7 @@ def main(args):
                 wandb.log(epoch_log, step=global_step)
         
             # Evaluation
-            if (epoch + 1) % 100 == 0:
+            if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
                     visualize_rewards(env, one_hot_encode_actions, fb_model, device)
             
@@ -328,26 +333,30 @@ if __name__ == "__main__":
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
     parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
-    parser.add_argument("--td_error_weight", type=float, default=10.0, help="Weight for TD-error constraint in demonstrations")
+    parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
+    parser.add_argument("--td_error_weight", type=float, default=0.1, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=10.0, help="Rationality for expert policy")
-    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
+    parser.add_argument("--expert_rationality", type=float, default=1.0, help="Rationality for expert policy")
+    parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
-    parser.add_argument("--num_epochs", type=int, default=1000)
+    parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--kl_weight", type=float, default=0.1, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
+    parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
+    parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=16)
-    parser.add_argument("--n_dct_basis_fns", type=int, default=12)
     parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
+    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one-hot, continuous_coordinate, dct)")
+    parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")

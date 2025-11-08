@@ -2,7 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from umfavi.envs.grid_env.actions import Action, action_diffs_coords
-from umfavi.envs.grid_env.features import coordinate_features
+from umfavi.envs.grid_env.features import feature_factory
 from umfavi.envs.grid_env.rewards import reward_factory
 
 def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
@@ -14,17 +14,17 @@ def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
         return i, j
     return i_new, j_new
 
-def dct_grid_env(grid_size: int, reward_type: str, p_rand: float):
+def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_rand: float, **kwargs):
     """
-    Creates a grid environment on the [0, 1]^2 square with DCT coefficents as state-features.
+    Creates a grid environment on the [0, 1]^2 square with user-specified state-features.
     Let n_S be the number of states.
 
     Args:
         grid_size (int): The number of grid points in each dimension.
-        n_dct_basis_fns (int): The number of DCT basis functions.
+        feature_type (str): The type of state feature encoding. See `feature_factory` for options.
         reward_type (str): The type of ground truth reward function. See `reward_factory` for options.
         p_rand (float): The probability of transitioning to a random state.
-
+        **kwargs: Additional arguments for `feature_factory`.
     Returns:
         P (np.ndarray): The transition probability matrix, s.t. P[s, a, s'] is the probability of transitioning from state s to state s' under action a.
         R (np.ndarray): The ground-truth reward function, s.t. R[s, a] is the reward for state s under action a.
@@ -61,35 +61,35 @@ def dct_grid_env(grid_size: int, reward_type: str, p_rand: float):
     R = reward_factory(grid_size, reward_type)
 
     # Create state-feature matrix.
-    # S_square = dct_features(grid_size, n_dct_basis_fns)
-    S_square = coordinate_features(grid_size)
+    S_square = feature_factory(feature_type, grid_size, **kwargs)
     S = S_square.reshape((grid_size ** 2, -1))
 
     return P, R, S
 
-class DCTGridEnv(gym.Env):
+class GridEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, grid_size, n_dct_basis_fns, reward_type, p_rand):
+    def __init__(self, grid_size, reward_type, p_rand, feature_type, **kwargs):
         """
-        Creates a discrete grid environment with Discrete-Cosine-Transform base-functions as observed features.
+        Creates a discrete grid environment with coordinate features as observed features.
 
         Args:
             grid_size (int): The number of grid points in each dimension.
-            n_dct_basis_fns (int): The number of DCT basis functions.
             reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff", "five_goals".
             p_rand (float): The probability of transitioning to a random state. Must be in [0, 1].
+            feature_type (str): The type of state feature encoding. See `feature_factory` for options.
+            **kwargs: Additional arguments for `feature_factory`.
         """
         super().__init__()
         self.grid_size = grid_size
-        self.n_dct_basis_fns = n_dct_basis_fns
         self.reward_type = reward_type
         assert 0 <= p_rand <= 1, "p_rand must be in [0, 1]"
         assert reward_type in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
         self.p_rand = p_rand
-
+        self.feature_type = feature_type
+        self.kwargs = kwargs
         # Compute S (features) etc. using existing code
-        self.P, self.R, self.S = dct_grid_env(grid_size, n_dct_basis_fns, reward_type, p_rand)
+        self.P, self.R, self.S = construct_grid_env(grid_size, feature_type, reward_type, p_rand, **kwargs)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 

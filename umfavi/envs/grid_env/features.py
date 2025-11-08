@@ -1,5 +1,25 @@
 import numpy as np
 
+def feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: int, **kwargs) -> np.ndarray:
+    """
+    Creates features on an N×N grid
+    """
+    if feature_type == "one_hot":
+        return one_hot_features(grid_size)
+    elif feature_type == "continuous_coordinate":
+        return coordinate_features(grid_size)
+    elif feature_type == "dct":
+        n_dct_basis_fns = kwargs.get("n_dct_basis_fns", 8)
+        return dct_features(grid_size, n_dct_basis_fns)
+    else:
+        raise ValueError(f"Invalid feature type: {feature_type}")
+
+def one_hot_features(grid_size: int) -> np.ndarray:
+    """
+    Creates one-hot features on an N×N grid
+    """
+    return np.eye(grid_size ** 2)
+
 def dct_features(grid_size: int, n_dct_basis_fns: int) -> np.ndarray:
     """
     Creates 2D DCT-II features on an N×N grid over [0,1]^2
