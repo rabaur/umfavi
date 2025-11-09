@@ -2,7 +2,8 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from umfavi.envs.grid_env.actions import Action, action_diffs_coords
-from umfavi.envs.grid_env.features import feature_factory
+from umfavi.envs.grid_env.state_features import state_feature_factory
+from umfavi.envs.grid_env.action_features import action_feature_factory
 from umfavi.envs.grid_env.rewards import reward_factory
 
 def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
@@ -29,6 +30,7 @@ def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_ra
         P (np.ndarray): The transition probability matrix, s.t. P[s, a, s'] is the probability of transitioning from state s to state s' under action a.
         R (np.ndarray): The ground-truth reward function, s.t. R[s, a] is the reward for state s under action a.
         S (np.ndarray): The state-feature matrix, s.t. S[s, :] is the feature vector for state s.
+        A (np.ndarray): The action-feature matrix, s.t. A[a, :] is the feature vector for state a.
     """
     # Create the transition probability matrix
     n_S = grid_size ** 2
@@ -60,11 +62,13 @@ def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_ra
     # Create reward matrix
     R = reward_factory(grid_size, reward_type)
 
-    # Create state-feature matrix.
-    S_square = feature_factory(feature_type, grid_size, **kwargs)
-    S = S_square.reshape((grid_size ** 2, -1))
+    # Create state-feature matrix (n_states, state_feature_dim).
+    S = state_feature_factory(feature_type, grid_size, **kwargs)
 
-    return P, R, S
+    # Create action-feature matrix (n_actions, action_feature_dim)
+    A = action_feature_factory(feature_type)
+
+    return P, R, S, A
 
 class GridEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
@@ -89,7 +93,7 @@ class GridEnv(gym.Env):
         self.feature_type = feature_type
         self.kwargs = kwargs
         # Compute S (features) etc. using existing code
-        self.P, self.R, self.S = construct_grid_env(grid_size, feature_type, reward_type, p_rand, **kwargs)
+        self.P, self.R, self.S, self.A = construct_grid_env(grid_size, feature_type, reward_type, p_rand, **kwargs)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 
@@ -112,7 +116,7 @@ class GridEnv(gym.Env):
         self.state_idx = i * self.grid_size + j
         features = self.S[self.state_idx].astype(np.float32)
         obs = {"state": np.array(self.state_coord, dtype=np.int32),
-               "observation": features}
+               "state_features": features}
         info = {}
         return obs, info
 
@@ -128,7 +132,7 @@ class GridEnv(gym.Env):
         truncated = False
         info = {}
         obs = {"state": np.array(self.state_coord, dtype=np.int32),
-               "observation": features}
+               "state_features": features}
         return obs, reward, terminated, truncated, info
 
     def render(self, mode="human"):

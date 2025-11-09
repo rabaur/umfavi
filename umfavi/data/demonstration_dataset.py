@@ -17,8 +17,6 @@ class DemonstrationDataset(Dataset):
         policy: Callable,
         env: gym.Env,
         device: str,
-        obs_transform: Callable = None,
-        act_transform: Callable = None,
         rationality: float = 1.0,
         gamma: float = 0.99,
         td_error_weight: float = 1.0
@@ -41,27 +39,12 @@ class DemonstrationDataset(Dataset):
         self.n_samples = n_samples
         self.n_steps = n_steps
         self.env = env
-        self.obs_transform = obs_transform
-        self.act_transform = act_transform
         self.device = device
         self.rationality = rationality
         self.gamma = gamma
         # Generate demonstrations
-        self.obs_seqs, self.states_seqs, self.acts_seqs = self.generate_demonstrations(policy=policy)
+        self.state_feats, self.states, self.acts = self.generate_demonstrations(policy=policy)
         self.td_error_weight = td_error_weight
-
-
-    def add_demonstrations(self, policy: Callable) -> None:
-        """
-        Add demonstrations to the dataset.
-        """
-        obs_seqs, acts_seqs = self.generate_demonstrations(policy)
-        if self.obs_seqs is None:
-            self.obs_seqs, self.acts_seqs = obs_seqs, acts_seqs
-        else:
-            self.obs_seqs.extend(obs_seqs)
-            self.acts_seqs.extend(acts_seqs)
-        self.n_samples = len(self.obs_seqs)
     
     def generate_demonstrations(self, policy: Callable) -> tuple[list[list], list[list]]:
         """
@@ -83,13 +66,6 @@ class DemonstrationDataset(Dataset):
 
             # Extract state-action pairs from trajectory
             obs, states, acts = extract_obs_state_actions(trajectory)
-
-            # Transform observations and actions
-            if self.obs_transform:
-                obs = list(map(self.obs_transform, obs))
-            
-            if self.act_transform:
-                acts = list(map(self.act_transform, acts))
 
             # Append the newly generated trajectory
             obs_seqs.append(obs)
@@ -117,10 +93,10 @@ class DemonstrationDataset(Dataset):
         """
 
         # Get the demonstration sequence
-        obs = self.obs_seqs[idx][:-1]
-        next_obs = self.obs_seqs[idx][1:]
-        states = self.states_seqs[idx][:-1]
-        next_states = self.states_seqs[idx][1:]
+        obs = self.state_feats[idx][:-1]
+        next_obs = self.state_feats[idx][1:]
+        states = self.states[idx][:-1]
+        next_states = self.states[idx][1:]
         acts = self.acts_seqs[idx][:-1]
         
         # Convert observations to tensors
@@ -139,9 +115,9 @@ class DemonstrationDataset(Dataset):
         
         return {
             "feedback_type": "demonstration",
-            "obs": obs_tensor,
-            "next_obs": next_obs_tensor,
-            "states": states_tensor,
+            "state": states_tensor,
+            "state_features": obs_tensor,
+            "next_state": next_obs_tensor,
             "next_states": next_states_tensor,
             "acts": acts_tensor,
             "targets": acts_tensor,

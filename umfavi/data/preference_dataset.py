@@ -19,8 +19,6 @@ class PreferenceDataset(Dataset):
         env: gym.Env,
         device: str,
         rationality: float = 1.0,
-        obs_transform: Callable = None,
-        act_transform: Callable = None
     ):
         """
         Initialize preference dataset.
@@ -35,8 +33,6 @@ class PreferenceDataset(Dataset):
         self.n_steps = n_steps
         self.env = env
         self.rationality = rationality
-        self.obs_transform = obs_transform
-        self.act_transform = act_transform
         self.device = device
 
         # Generate trajectory pairs and preferences
@@ -79,15 +75,6 @@ class PreferenceDataset(Dataset):
             obs1, states1, acts1 = extract_obs_state_actions(traj1)
             obs2, states2, acts2 = extract_obs_state_actions(traj2)
 
-            # Transform observations and actions
-            if self.obs_transform:
-                obs1 = list(map(self.obs_transform, obs1))
-                obs2 = list(map(self.obs_transform, obs2))
-            
-            if self.act_transform:
-                acts1 = list(map(self.act_transform, acts1))
-                acts2 = list(map(self.act_transform, acts2))
-
             # Compute true returns
             rews1 = get_rewards(traj1)
             rews2 = get_rewards(traj2)
@@ -123,15 +110,9 @@ class PreferenceDataset(Dataset):
         states1_tensor = torch.tensor(states1, dtype=torch.int32).to(self.device)
         states2_tensor = torch.tensor(states2, dtype=torch.int32).to(self.device)
 
-        # Handle actions - if act_transform was applied, acts1/acts2 are lists of tensors
-        if self.act_transform:
-            # Stack the already transformed tensors
-            acts1_tensor = torch.stack(acts1).to(self.device)
-            acts2_tensor = torch.stack(acts2).to(self.device)
-        else:
-            # Convert to tensor if no transformation was applied
-            acts1_tensor = torch.tensor(acts1, dtype=torch.float32).to(self.device)
-            acts2_tensor = torch.tensor(acts2, dtype=torch.float32).to(self.device)
+        # Convert actions to tensors
+        acts1_tensor = torch.tensor(acts1, dtype=torch.float32).to(self.device)
+        acts2_tensor = torch.tensor(acts2, dtype=torch.float32).to(self.device)
         
         # Concatenate obs and acts for easier handling
         obs_tensor = torch.stack([obs1_tensor[:-1], obs2_tensor[:-1]], dim=0)
@@ -142,7 +123,7 @@ class PreferenceDataset(Dataset):
         preference = torch.tensor(preference, dtype=torch.float32).unsqueeze(0).to(self.device)
         return {
             "feedback_type": "preference",
-            "obs": obs_tensor,
+            "state_features": obs_tensor,
             "next_obs": next_obs_tensor,
             "states": state_tensor,
             "next_states": next_state_tensor,

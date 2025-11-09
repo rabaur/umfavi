@@ -1,33 +1,28 @@
 import numpy as np
+from umfavi.utils.features import one_hot_features, discrete_features
 
-def feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: int, **kwargs) -> np.ndarray:
+
+def state_feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: int, **kwargs) -> np.ndarray:
     """
-    Creates features on an N×N grid
+    Creates state features.
+
+    Returns:
+        (n_states, state_feature_dim) tensor where row i corresponds to features of state i.
     """
+    n_states = grid_size**2
     if feature_type == "one_hot":
-        return one_hot_features(grid_size)
+        feats = one_hot_features(n_states)
     elif feature_type == "continuous_coordinate":
-        return coordinate_features(grid_size)
+        feats = coordinate_features(grid_size)
     elif feature_type == "dct":
         n_dct_basis_fns = kwargs.get("n_dct_basis_fns", 8)
-        return dct_features(grid_size, n_dct_basis_fns)
+        feats = dct_features(grid_size, n_dct_basis_fns)
     elif feature_type == "embedding":
-        return embedding_pre_features(grid_size)
+        feats = discrete_features(grid_size)
     else:
         raise ValueError(f"Invalid feature type: {feature_type}")
-
-
-def embedding_pre_features(grid_size: int) -> np.ndarray:
-    """
-    When features are learned via embedding, we simply pass the state index as the feature.
-    """
-    return np.arange(grid_size ** 2, dtype=np.int32)[:, None]
-
-def one_hot_features(grid_size: int) -> np.ndarray:
-    """
-    Creates one-hot features on an N×N grid
-    """
-    return np.eye(grid_size ** 2)
+    assert feats.shape[0] == n_states, f"State-feature matrix has {feats.shape[0]} instead of {n_states=} rows"
+    return feats
 
 def dct_features(grid_size: int, n_dct_basis_fns: int) -> np.ndarray:
     """
@@ -57,7 +52,8 @@ def dct_features(grid_size: int, n_dct_basis_fns: int) -> np.ndarray:
             feats.append(au * av * cos_u * cos_v)
 
     # stack into (N, N, K*K)
-    return np.stack(feats, axis=-1)
+    feats = np.stack(feats, axis=-1)
+    return feats.reshape((N*N, -1))
 
 def coordinate_features(grid_size: int):
     """
@@ -69,4 +65,5 @@ def coordinate_features(grid_size: int):
     x = np.linspace(0, 1, N)
     y = np.linspace(0, 1, N)
     xv, yv = np.meshgrid(x, y, indexing='ij')
-    return np.stack([xv, yv], axis=-1)
+    feats = np.stack([xv, yv], axis=-1)
+    return feats.reshape((N*N, -1))

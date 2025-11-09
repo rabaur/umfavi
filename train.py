@@ -94,8 +94,6 @@ def main(args):
     # Create datasets and dataloaders
     datasets = {}
     dataloaders = {}
-
-    act_transform = lambda a: one_hot_encode_actions(a, n_actions=n_actions)
     
     if "preference" in active_feedback_types:
         pref_dataset = PreferenceDataset(
@@ -104,7 +102,6 @@ def main(args):
             env=env,
             policy=preference_policy,
             device=device,
-            act_transform=act_transform,
             rationality=args.pref_rationality,
         )
         datasets["preference"] = pref_dataset
@@ -118,7 +115,6 @@ def main(args):
             env=env,
             policy=demonstration_policy,
             device=device,
-            act_transform=act_transform,
             rationality=args.expert_rationality,
             gamma=args.gamma,
             td_error_weight=args.td_error_weight,
