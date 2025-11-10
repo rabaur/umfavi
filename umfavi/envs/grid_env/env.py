@@ -15,7 +15,14 @@ def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
         return i, j
     return i_new, j_new
 
-def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_rand: float, **kwargs):
+def construct_grid_env(
+    grid_size: int,
+    state_feature_type: str,
+    action_feature_type: str,
+    reward_type: str,
+    p_rand: float,
+    **kwargs,
+):
     """
     Creates a grid environment on the [0, 1]^2 square with user-specified state-features.
     Let n_S be the number of states.
@@ -63,12 +70,24 @@ def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_ra
     R = reward_factory(grid_size, reward_type)
 
     # Create state-feature matrix (n_states, state_feature_dim).
-    S = state_feature_factory(feature_type, grid_size, **kwargs)
+    S = state_feature_factory(state_feature_type, grid_size, **kwargs)
 
     # Create action-feature matrix (n_actions, action_feature_dim)
-    A = action_feature_factory(feature_type, n_actions=n_A)
+    A = action_feature_factory(action_feature_type, n_actions=n_A)
 
     return P, R, S, A
+
+def validate_kwargs(kwargs):
+    assert "grid_size" in kwargs, "grid_size must be provided"
+    assert "reward_type" in kwargs, "reward_type must be provided"
+    assert "state_feature_type" in kwargs, "state_feature_type must be provided"
+    assert "action_feature_type" in kwargs, "action_feature_type must be provided"
+    assert "p_rand" in kwargs, "p_rand must be provided"
+    assert kwargs["grid_size"] > 0, "grid_size must be positive"
+    assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
+    assert kwargs["reward_type"] in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
+    assert kwargs["state_feature_type"] in ["one_hot", "continuous_coordinate", "dct", "embedding"], "Invalid state feature type"
+    assert kwargs["action_feature_type"] in ["one_hot", "embedding"], "Invalid action feature type"
 
 class GridEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
@@ -85,15 +104,14 @@ class GridEnv(gym.Env):
             **kwargs: Additional arguments for `feature_factory`.
         """
         super().__init__()
+        validate_kwargs(kwargs)
         self.grid_size = kwargs["grid_size"]
         self.reward_type = kwargs["reward_type"]
-        assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
-        assert kwargs["reward_type"] in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
         self.p_rand = kwargs["p_rand"]
-        self.feature_type = kwargs["feature_type"]
-        self.kwargs = kwargs
+        self.state_feature_type = kwargs["state_feature_type"]
+        self.action_feature_type = kwargs["action_feature_type"]
         # Compute S (features) etc. using existing code
-        self.P, self.R, self.S, self.A = construct_grid_env(kwargs["grid_size"], kwargs["feature_type"], kwargs["reward_type"], kwargs["p_rand"], **kwargs)
+        self.P, self.R, self.S, self.A = construct_grid_env(**kwargs)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 
@@ -103,7 +121,7 @@ class GridEnv(gym.Env):
         except IndexError:
             state_feature_shape = self.S.shape[0]
         self.observation_space = spaces.Dict({
-            "state": spaces.Box(low=np.array([0,0]), high=np.array([grid_size-1, grid_size-1]), dtype=np.int32, shape=(2,)),
+            "state": spaces.Box(low=np.array([0,0]), high=np.array([self.grid_size-1, self.grid_size-1]), dtype=np.int32, shape=(2,)),
             "state_features": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(state_feature_shape,))
         })
         self.state_coord = None  # will hold (i,j)

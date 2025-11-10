@@ -59,7 +59,7 @@ class MLPFeatureModule(nn.Module):
         for i in range(len(hidden_sizes) - 1):
             layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
             if i < len(hidden_sizes) - 2 or activate_last_layer:
-                layers.append(nn.LeakyReLU())
+                layers.append(nn.SiLU())
         self.mlp = nn.Sequential(*layers)
         self.out_dim = hidden_sizes[-1]
     

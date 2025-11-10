@@ -16,7 +16,7 @@ from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
-from umfavi.visualization.dct_grid_env_visualizer import (
+from umfavi.grid_env_visualizer import (
     visualize_rewards
 )
 
@@ -316,7 +316,7 @@ def main(args):
             # Evaluation
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
-                    visualize_rewards(env, fb_model, device)
+                    visualize_rewards(env, fb_model, device, dataloaders["demonstration"])
             
             # Set model back to training mode
             fb_model.train()
@@ -330,20 +330,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=1024, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=32, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=64, help="Length of each trajectory")
+    parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=1.0, help="Rationality for expert policy")
+    parser.add_argument("--expert_rationality", type=float, default=10.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
     parser.add_argument("--state_embedding_size", type=int, default=32, help="Only used if state_feature_type=='embedding'")
     parser.add_argument("--action_feature_type", type=str, default="embedding", help="Type of action feature encoding (one_hot, embedding)")
-    parser.add_argument("--action_embedding_size", type=int, default=16, help="Only used if state_feature_type=='embedding")
+    parser.add_argument("--action_embedding_size", type=int, default=8, help="Only used if state_feature_type=='embedding")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")

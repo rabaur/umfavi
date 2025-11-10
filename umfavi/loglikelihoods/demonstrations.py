@@ -82,7 +82,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        logits = rationality * q_values  # (batch_size, num_steps, n_actions)
+        logits = q_values  # (batch_size, num_steps, n_actions)
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)

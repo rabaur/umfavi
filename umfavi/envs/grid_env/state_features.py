@@ -53,7 +53,7 @@ def dct_features(grid_size: int, n_dct_basis_fns: int) -> np.ndarray:
 
     # stack into (N, N, K*K)
     feats = np.stack(feats, axis=-1)
-    return feats.reshape((N*N, -1))
+    return feats.reshape((N*N, -1)).astype(np.float32)
 
 def coordinate_features(grid_size: int):
     """
@@ -66,4 +66,4 @@ def coordinate_features(grid_size: int):
     y = np.linspace(0, 1, N)
     xv, yv = np.meshgrid(x, y, indexing='ij')
     feats = np.stack([xv, yv], axis=-1)
-    return feats.reshape((N*N, -1))
+    return feats.reshape((N*N, -1)).astype(np.float32)

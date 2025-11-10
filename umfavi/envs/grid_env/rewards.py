@@ -10,23 +10,6 @@ def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
         return i, j
     return i_new, j_new
 
-def reward_sparse(grid_size: int, goal_state_offset: int = 2) -> np.ndarray:
-    """
-    Creates a sparse reward function for the grid environment.
-    """
-    n_S = grid_size ** 2
-    n_A = 5
-    R = np.full((n_S, n_A), -0.1)
-    s_goal_idx = (grid_size - goal_state_offset) * grid_size + (grid_size - goal_state_offset)
-
-    # All actions in the goal state have reward 1
-    R[s_goal_idx, Action.STAY] = 1
-    R[s_goal_idx, Action.LEFT] = 1
-    R[s_goal_idx, Action.RIGHT] = 1
-    R[s_goal_idx, Action.UP] = 1
-    R[s_goal_idx, Action.DOWN] = 1
-
-    return R
 
 def reward_factory(grid_size: int, reward_type: str):
     """
@@ -155,5 +138,19 @@ def reward_factory(grid_size: int, reward_type: str):
             R += scale * np.exp(-((xs - goal_x) ** 2 + (ys - goal_y) ** 2) / (2 * 0.1 ** 2))
         R_flat = R.reshape(n_S, -1).squeeze()
         R = np.repeat(R_flat[:, None], n_A, axis=1) # Each action has same reward for all states
+
+    return R
+
+def reward_sparse(grid_size: int, goal_state_offset: int = 2) -> np.ndarray:
+    """
+    Creates a sparse reward function for the grid environment.
+    """
+    n_S = grid_size ** 2
+    n_A = 5
+    R = np.zeros((n_S, n_A))
+    s_goal_idx = (grid_size - goal_state_offset) * grid_size + (grid_size - goal_state_offset)
+
+    # Staying in the goal state is the only rewarding state
+    R[s_goal_idx, Action.STAY] = 1
 
     return R
