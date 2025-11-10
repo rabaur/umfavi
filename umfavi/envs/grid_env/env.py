@@ -66,7 +66,7 @@ def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_ra
     S = state_feature_factory(feature_type, grid_size, **kwargs)
 
     # Create action-feature matrix (n_actions, action_feature_dim)
-    A = action_feature_factory(feature_type)
+    A = action_feature_factory(feature_type, n_actions=n_A)
 
     return P, R, S, A
 
@@ -98,23 +98,24 @@ class GridEnv(gym.Env):
         self.action_space = spaces.Discrete(len(Action))
 
         # Observation space
+        try:
+            state_feature_shape = self.S.shape[1]
+        except IndexError:
+            state_feature_shape = self.S.shape[0]
         self.observation_space = spaces.Dict({
             "state": spaces.Box(low=np.array([0,0]), high=np.array([grid_size-1, grid_size-1]), dtype=np.int32, shape=(2,)),
-            "observation": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(self.S.shape[1],))
+            "state_features": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(state_feature_shape,))
         })
         self.state_coord = None  # will hold (i,j)
         self.state_idx = None
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        # # Choose a random (i,j)
-        # i = self.np_random.integers(self.grid_size)
-        # j = self.np_random.integers(self.grid_size)
         i = 0
         j = 0
         self.state_coord = (i, j)
         self.state_idx = i * self.grid_size + j
-        features = self.S[self.state_idx].astype(np.float32)
+        features = self.S[self.state_idx]
         obs = {"state": np.array(self.state_coord, dtype=np.int32),
                "state_features": features}
         info = {}
@@ -126,7 +127,7 @@ class GridEnv(gym.Env):
         i2, j2 = succ_state_deterministic(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
         self.state_idx = i2 * self.grid_size + j2
-        features = self.S[self.state_idx].astype(np.float32)
+        features = self.S[self.state_idx]
         reward = self.R[self.state_idx, action]
         terminated = False
         truncated = False

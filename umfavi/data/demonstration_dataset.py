@@ -43,21 +43,30 @@ class DemonstrationDataset(Dataset):
         self.rationality = rationality
         self.gamma = gamma
         # Generate demonstrations
-        self.state_feats, self.states, self.acts = self.generate_demonstrations(policy=policy)
+        demos = self.generate_demonstrations(policy=policy)
+        self.state_feats = demos["state_feats"]
+        self.states = demos["states"]
+        self.act_feats = demos["act_feats"]
+        self.acts = demos["acts"]
         self.td_error_weight = td_error_weight
     
-    def generate_demonstrations(self, policy: Callable) -> tuple[list[list], list[list]]:
+    def generate_demonstrations(self, policy: Callable) -> dict:
         """
         Generate expert demonstration trajectories.
         
         Returns:
-            Tuple of (obs_seqs, acts_seqs) where:
-            - obs_seqs: List of observation sequences
-            - acts_seqs: List of action sequences
+            Dictionary with:
+            - state_feats: List of state feature sequences
+            - states: List of state sequences
+            - act_feats: List of action feature sequences
+            - acts: List of action sequences
         """
-        obs_seqs = []
-        states_seqs = []
-        acts_seqs = []
+        data = {
+            "state_feats": [],
+            "states": [],
+            "act_feats": [],
+            "acts": [],
+        }
         
         for _ in range(self.n_samples):
             # Generate trajectory using the expert policy
@@ -65,14 +74,15 @@ class DemonstrationDataset(Dataset):
             trajectory = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectory
-            obs, states, acts = extract_obs_state_actions(trajectory)
+            traj_data = extract_obs_state_actions(trajectory, self.env)
 
             # Append the newly generated trajectory
-            obs_seqs.append(obs)
-            states_seqs.append(states)
-            acts_seqs.append(acts)
-            
-        return obs_seqs, states_seqs, acts_seqs
+            data["state_feats"].append(traj_data["state_feats"])
+            data["states"].append(traj_data["states"])
+            data["act_feats"].append(traj_data["act_feats"])
+            data["acts"].append(traj_data["acts"])
+        
+        return data
     
     def __len__(self):
         return self.n_samples
@@ -87,39 +97,37 @@ class DemonstrationDataset(Dataset):
         Returns:
             Dictionary with:
             - feedback_type: "demonstration"
-            - obs: Observation sequence tensor
+            - state_features: State features tensor
             - acts: Action sequence tensor (targets for behavioral cloning)
             - targets: Same as acts (for consistency with other datasets)
         """
 
         # Get the demonstration sequence
-        obs = self.state_feats[idx][:-1]
-        next_obs = self.state_feats[idx][1:]
+        state_feats = self.state_feats[idx][:-1]
+        next_state_feats = self.state_feats[idx][1:]
         states = self.states[idx][:-1]
         next_states = self.states[idx][1:]
-        acts = self.acts_seqs[idx][:-1]
+        acts = self.acts[idx][:-1]
+        act_feats = self.act_feats[idx][:-1]
         
         # Convert observations to tensors
-        obs_tensor = torch.tensor(obs).to(self.device)
-        next_obs_tensor = torch.tensor(next_obs).to(self.device)
+        state_feats_tensor = torch.tensor(state_feats).to(self.device)
+        next_state_feats_tensor = torch.tensor(next_state_feats).to(self.device)
         states_tensor = torch.tensor(states).to(self.device)
         next_states_tensor = torch.tensor(next_states).to(self.device)
 
-        # Handle actions - if act_transform was applied, acts is a list of tensors
-        if self.act_transform:
-            # Stack the already transformed tensors
-            acts_tensor = torch.stack(acts).to(self.device)
-        else:
-            # Convert to tensor if no transformation was applied
-            acts_tensor = torch.tensor(acts).to(self.device)
+        # Convert actions to tensors
+        acts_tensor = torch.tensor(acts).to(self.device)
+        act_feats_tensor = torch.tensor(act_feats).to(self.device)
         
         return {
             "feedback_type": "demonstration",
-            "state": states_tensor,
-            "state_features": obs_tensor,
-            "next_state": next_obs_tensor,
+            "states": states_tensor,
+            "state_features": state_feats_tensor,
             "next_states": next_states_tensor,
-            "acts": acts_tensor,
+            "next_state_features": next_state_feats_tensor,
+            "actions": acts_tensor,
+            "action_features": act_feats_tensor,
             "targets": acts_tensor,
             "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
             "gamma": self.gamma,

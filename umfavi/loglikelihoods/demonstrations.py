@@ -36,8 +36,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
             ...
         """
         # Extract parameters from kwargs
-        obs = kwargs["obs"]
-        acts = kwargs["acts"]
+        state_feats = kwargs["state_features"]
+        acts = kwargs["actions"]
         reward_means = kwargs["reward_mean"]
         reward_log_vars = kwargs["reward_log_var"]
         rationality = kwargs["rationality"][0].item()
@@ -45,7 +45,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         td_error_weight = kwargs["td_error_weight"][0].item()
 
         # Get the Q-value estimates
-        q_values = self.Q_value_model(obs)  # (batch_size, num_steps, n_actions)
+        q_values = self.Q_value_model(state_feats)  # (batch_size, num_steps, n_actions)
 
         # ------------------------------------------------------------------------------------------------
         # TD-error constraint
@@ -53,16 +53,15 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s_t, a_t) - γ * Q(s', a')]
         
-        # Get action indices
-        act_integer = torch.argmax(acts, dim=-1)  # (batch_size, num_steps)
-        act_integer_curr = act_integer[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
-        act_integer_next = act_integer[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
-        
+        # Get action indices (that doesn't work anymore)
+        acts_curr = acts[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
+        acts_next = acts[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
+
         # Select Q(s_t, a_t) for current state-action pairs
-        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=act_integer_curr.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
+        q_curr = torch.gather(q_values[:, :-1, :], dim=2, index=acts_curr.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
         
         # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
-        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=act_integer_next.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
+        q_next = torch.gather(q_values[:, 1:, :], dim=2, index=acts_next.unsqueeze(-1))  # (batch_size, num_steps - 1, 1)
         
         # Compute TD-error (which should equal the reward)
         td_error_selected = q_curr - gamma * q_next  # (batch_size, num_steps - 1, 1)
@@ -84,6 +83,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, act_integer.squeeze(), reduction='none').sum(-1).mean()
+        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').sum(-1).mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight

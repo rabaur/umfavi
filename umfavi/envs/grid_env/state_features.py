@@ -18,7 +18,7 @@ def state_feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: in
         n_dct_basis_fns = kwargs.get("n_dct_basis_fns", 8)
         feats = dct_features(grid_size, n_dct_basis_fns)
     elif feature_type == "embedding":
-        feats = discrete_features(grid_size)
+        feats = discrete_features(n_states)
     else:
         raise ValueError(f"Invalid feature type: {feature_type}")
     assert feats.shape[0] == n_states, f"State-feature matrix has {feats.shape[0]} instead of {n_states=} rows"

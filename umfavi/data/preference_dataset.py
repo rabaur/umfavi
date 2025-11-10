@@ -36,7 +36,7 @@ class PreferenceDataset(Dataset):
         self.device = device
 
         # Generate trajectory pairs and preferences
-        self.obs_seq_pairs, self.state_seq_pairs, self.acts_seq_pairs, self.preferences = self.generate_preferences(policy=policy)
+        self._pairs, self.state_seq_pairs, self.acts_seq_pairs, self.preferences = self.generate_preferences(policy=policy)
         
     def _compute_trajectory_return(self, trajectory: list[tuple[int, int, float]]) -> float:
         """
@@ -72,8 +72,8 @@ class PreferenceDataset(Dataset):
             traj2 = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectories
-            obs1, states1, acts1 = extract_obs_state_actions(traj1)
-            obs2, states2, acts2 = extract_obs_state_actions(traj2)
+            state_feats1, states1, acts1 = extract_obs_state_actions(traj1, self.env)
+            state_feats2, states2, acts2 = extract_obs_state_actions(traj2, self.env)
 
             # Compute true returns
             rews1 = get_rewards(traj1)

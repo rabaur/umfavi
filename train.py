@@ -61,10 +61,8 @@ def main(args):
     # Get all state-action features for evaluation
     n_states = env.S.shape[0]
     n_actions = env.action_space.n
-    state_feats_flat = torch.tensor(env.S, dtype=torch.float32).to(device=device)
-    action_feats = torch.zeros((n_actions, n_actions), dtype=torch.float32).to(device=device)
-    for a in range(n_actions):
-        action_feats[a, :] = one_hot_encode_actions(a, env.action_space.n)
+    state_feats_flat = torch.tensor(env.S).to(device=device)
+    action_feats = torch.tensor(env.A).to(device=device)
 
     # Register feedback types and their sample counts
     feedback_config = {
@@ -124,16 +122,17 @@ def main(args):
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
 
     # Create feature module and encoder
-    obs_dim = env.observation_space["observation"].shape[0]
+    obs_dim = env.observation_space["state_features"].shape[0]
     act_dim = env.action_space.n
+    learn_embedding = args.state_feature_type == "embedding"
     feature_module = MLPFeatureModule(
         obs_dim,
         act_dim,
         args.encoder_hidden_sizes,
         reward_domain=args.reward_domain,
-        learn_embedding=args.state_feature_type == "embedding",
-        state_embedding_size=args.state_feature_size,
-        action_embedding_size=args.action_feature_size,
+        learn_embedding=learn_embedding,
+        state_embedding_size=args.state_embedding_size,
+        action_embedding_size=args.action_embedding_size,
         n_actions=n_actions,
         n_states=n_states
     )
@@ -152,7 +151,12 @@ def main(args):
         q_value_model = MLPFeatureModule(
             state_dim=obs_dim,
             action_dim=act_dim,  # Not used since reward_domain='s'
+            learn_embedding=learn_embedding,
             hidden_sizes=args.q_value_hidden_sizes + [act_dim],
+            state_embedding_size=args.state_embedding_size,
+            action_embedding_size=args.action_embedding_size,
+            n_states=n_states,
+            n_actions=n_actions,
             reward_domain='s',
             activate_last_layer=False
         )
@@ -279,8 +283,8 @@ def main(args):
                 # Compute the mean estimated reward per state-action pair
                 R_est = np.empty((n_states, n_actions))
                 for a in range(n_actions):
-                    a_feats_repped = action_feats[a, :].repeat(n_states, 1)
-                    R_mean_a, _ = fb_model.encoder(state_feats_flat, a_feats_repped, state_feats_flat)
+                    a_feats_tiled = torch.tile(action_feats[a], (n_states, 1))
+                    R_mean_a, _ = fb_model.encoder(state_feats_flat, a_feats_tiled, state_feats_flat)
                     R_est[:, a] = to_numpy(R_mean_a).squeeze()
 
                 # Compute epic distance
@@ -316,7 +320,7 @@ def main(args):
             # Evaluation
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
-                    visualize_rewards(env, one_hot_encode_actions, fb_model, device)
+                    visualize_rewards(env, fb_model, device)
             
             # Set model back to training mode
             fb_model.train()
@@ -329,11 +333,11 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=128, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
-    parser.add_argument("--td_error_weight", type=float, default=0.1, help="Weight for TD-error constraint in demonstrations")
+    parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
@@ -344,20 +348,20 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
     
     # Environment parameters
-    parser.add_argument("--grid_size", type=int, default=16)
+    parser.add_argument("--grid_size", type=int, default=10)
     parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
+    parser.add_argument("--state_feature_type", type=str, default="embedding", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
     parser.add_argument("--state_embedding_size", type=int, default=128, help="Only used if state_feature_type=='embedding'")
-    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot, embedding)")
+    parser.add_argument("--action_feature_type", type=str, default="embedding", help="Type of action feature encoding (one_hot, embedding)")
     parser.add_argument("--action_embedding_size", type=int, default=16, help="Only used if state_feature_type=='embedding")
     
     # Visualization parameters

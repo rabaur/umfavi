@@ -46,7 +46,6 @@ def visualize_batch(batch: dict, N: int):
 
 def visualize_rewards(
     env: GridEnv,
-    act_transform: Callable,
     fb_model: MultiFeedbackTypeModel,
     device: torch.device,
     gamma: float = 0.99):
@@ -81,7 +80,7 @@ def visualize_rewards(
     all_learned_stds = []
     
     # Get reward mean and logvar for each state-action combination
-    state_feats_flat = torch.tensor(env.S, dtype=torch.float32).to(device=device)
+    state_feats_flat = torch.tensor(env.S).to(device=device)
 
     row_order = [Action.RIGHT, Action.UP, Action.LEFT, Action.DOWN, Action.STAY]
     
@@ -92,10 +91,10 @@ def visualize_rewards(
         
         # Convert action to features
         a = act.value
-        a_feat = act_transform(a, n_actions=n_actions)
+        a_feat = torch.tensor(env.A[a]).to(device)
 
         # Repeat to match features
-        a_feat_reps = torch.tile(torch.tensor(a_feat, dtype=torch.float32).to(device), (grid_size**2, 1))
+        a_feat_reps = torch.tile(a_feat, (grid_size**2, 1))
 
         # Predict mean and logvar
         mean, log_var = fb_model.encoder(state_feats_flat, a_feat_reps, state_feats_flat)

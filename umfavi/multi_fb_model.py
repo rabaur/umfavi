@@ -2,10 +2,11 @@ from torch import nn
 from typing import Any
 from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.priors import kl_divergence_std_normal
+from umfavi.encoder.reward_encoder import BaseRewardEncoder
 
 class MultiFeedbackTypeModel(nn.Module):
 
-    def __init__(self, encoder: nn.Module, decoders: dict[str, BaseLogLikelihood]):
+    def __init__(self, encoder: BaseRewardEncoder, decoders: dict[str, BaseLogLikelihood]):
         super().__init__()
         self.encoder = encoder
         self.decoders = nn.ModuleDict(decoders)
@@ -13,11 +14,11 @@ class MultiFeedbackTypeModel(nn.Module):
     def forward(self, **kwargs) -> Any:
 
         # Encode
-        obs = kwargs["obs"]
-        acts = kwargs.get("acts", None)
-        next_obs = kwargs.get("next_obs", None)
-        mean, log_var = self.encoder(obs, acts, next_obs)
-        r_samples = self.encoder.sample(mean, log_var)
+        state_feats = kwargs["state_features"]
+        action_feats = kwargs["action_features"]
+        next_state_feats = kwargs["next_state_features"]
+        mean, log_var = self.encoder(state_feats, action_feats, next_state_feats)
+        reward_samples = self.encoder.sample(mean, log_var)
         kl_div = kl_divergence_std_normal(mean, log_var)
 
         # Route to appropriate head with all kwargs
@@ -27,6 +28,6 @@ class MultiFeedbackTypeModel(nn.Module):
         kwargs["reward_mean"] = mean.squeeze(-1)
         kwargs["reward_log_var"] = log_var.squeeze(-1)
         
-        nll = head(r_samples, **kwargs)
+        nll = head(reward_samples, **kwargs)
 
         return {"negative_log_likelihood": nll, "kl_divergence": kl_div}

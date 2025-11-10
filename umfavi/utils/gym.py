@@ -1,5 +1,6 @@
 import gymnasium as gym
 from typing import Any, Callable
+from umfavi.envs.grid_env.env import GridEnv
 
 def rollout(env: gym.Env, policy: Callable, n_steps: int) -> list[list[tuple[dict, int, bool, dict]]]:
     ep = []
@@ -18,14 +19,21 @@ def rollout(env: gym.Env, policy: Callable, n_steps: int) -> list[list[tuple[dic
 
 def extract_obs_state_actions(
     trajectory: list[tuple[dict, int, bool, dict]],
+    env: GridEnv
 ) -> list[tuple[Any]]:
     """
     Get state-action pairs from a trajectory.
     """
-    obs = [obs["observation"] for obs, _, _, _, _ in trajectory]
     states = [state["state"] for state, _, _, _, _ in trajectory]
+    state_feats = [state_feat["state_features"] for state_feat, _, _, _, _ in trajectory]
     acts = [act for _, act, _, _, _ in trajectory]
-    return obs, states, acts
+    act_feats = [env.A[act] for act in acts]
+    return {
+        "states": states,
+        "state_feats": state_feats,
+        "acts": acts,
+        "act_feats": act_feats,
+    }
 
 def get_rewards(trajectory: list[tuple[dict, int, bool, dict]]) -> list[float]:
     """
