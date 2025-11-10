@@ -73,7 +73,7 @@ def construct_grid_env(grid_size: int, feature_type: str, reward_type: str, p_ra
 class GridEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, grid_size, reward_type, p_rand, feature_type, **kwargs):
+    def __init__(self, **kwargs):
         """
         Creates a discrete grid environment with coordinate features as observed features.
 
@@ -85,15 +85,15 @@ class GridEnv(gym.Env):
             **kwargs: Additional arguments for `feature_factory`.
         """
         super().__init__()
-        self.grid_size = grid_size
-        self.reward_type = reward_type
-        assert 0 <= p_rand <= 1, "p_rand must be in [0, 1]"
-        assert reward_type in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
-        self.p_rand = p_rand
-        self.feature_type = feature_type
+        self.grid_size = kwargs["grid_size"]
+        self.reward_type = kwargs["reward_type"]
+        assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
+        assert kwargs["reward_type"] in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
+        self.p_rand = kwargs["p_rand"]
+        self.feature_type = kwargs["feature_type"]
         self.kwargs = kwargs
         # Compute S (features) etc. using existing code
-        self.P, self.R, self.S, self.A = construct_grid_env(grid_size, feature_type, reward_type, p_rand, **kwargs)
+        self.P, self.R, self.S, self.A = construct_grid_env(kwargs["grid_size"], kwargs["feature_type"], kwargs["reward_type"], kwargs["p_rand"], **kwargs)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 

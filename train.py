@@ -48,11 +48,7 @@ def main(args):
         print(f"Wandb URL: {wandb.run.url if wandb.run else 'N/A'}\n")
 
     env = GridEnv(
-        grid_size=args.grid_size,
-        reward_type=args.reward_type,
-        p_rand=args.p_rand,
-        feature_type=args.state_feature_type,
-        **{"n_dct_basis_fns": args.n_dct_basis_fns},
+        **vars(args),
     )
 
     device = get_device()
@@ -334,9 +330,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=256, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=1024, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
+    parser.add_argument("--num_steps", type=int, default=64, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
@@ -360,7 +356,7 @@ if __name__ == "__main__":
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     parser.add_argument("--state_feature_type", type=str, default="embedding", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
-    parser.add_argument("--state_embedding_size", type=int, default=128, help="Only used if state_feature_type=='embedding'")
+    parser.add_argument("--state_embedding_size", type=int, default=32, help="Only used if state_feature_type=='embedding'")
     parser.add_argument("--action_feature_type", type=str, default="embedding", help="Type of action feature encoding (one_hot, embedding)")
     parser.add_argument("--action_embedding_size", type=int, default=16, help="Only used if state_feature_type=='embedding")
     

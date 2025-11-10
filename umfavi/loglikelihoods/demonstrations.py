@@ -75,7 +75,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         reward_log_vars_sliced = torch.clamp(reward_log_vars_sliced, min=-1.5, max=3)
         reward_vars_sliced = reward_log_vars_sliced.exp()
 
-        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').mean(-1).mean()
+        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -86,6 +86,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean(-1).mean()
+        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight
