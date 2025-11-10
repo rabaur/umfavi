@@ -11,6 +11,5 @@ def kl_divergence_std_normal(mean: torch.Tensor, log_var: torch.Tensor) -> torch
     Returns:
         KL divergence loss
     """
-    kl_loss = 0.5 * torch.sum(mean.pow(2) + log_var.exp() - log_var - 1, dim=1)
-    mean_kl_loss = kl_loss.mean()
-    return mean_kl_loss
+    kl_loss = 0.5 * (mean.pow(2) + log_var.exp() - log_var - 1.0)
+    return kl_loss.mean()

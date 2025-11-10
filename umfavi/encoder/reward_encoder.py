@@ -18,7 +18,7 @@ class RewardEncoder(BaseRewardEncoder):
         super().__init__()
         self.features = feature_module
         self.mean_head = nn.Linear(feature_module.out_dim, 1)
-        self.logvar_head = nn.Sequential(nn.Linear(feature_module.out_dim, 1), nn.Softplus())
+        self.logvar_head = nn.Linear(feature_module.out_dim, 1)
 
     def forward(self, state_features: torch.Tensor, action_features: torch.Tensor, next_state_features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         features = self.features(state_features, action_features, next_state_features)

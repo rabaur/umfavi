@@ -333,8 +333,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=128, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=256, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")

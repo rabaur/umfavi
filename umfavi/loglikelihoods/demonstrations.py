@@ -37,7 +37,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         """
         # Extract parameters from kwargs
         state_feats = kwargs["state_features"]
-        acts = kwargs["actions"]
+        acts = kwargs["actions"].long()
         reward_means = kwargs["reward_mean"]
         reward_log_vars = kwargs["reward_log_var"]
         rationality = kwargs["rationality"][0].item()
@@ -53,7 +53,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s_t, a_t) - γ * Q(s', a')]
         
-        # Get action indices (that doesn't work anymore)
+        # current and next state-action pairs
         acts_curr = acts[:, :-1]  # (batch_size, num_steps - 1) - actions at time t
         acts_next = acts[:, 1:]   # (batch_size, num_steps - 1) - actions at time t+1
 
@@ -70,9 +70,12 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
         reward_means_sliced = reward_means[:, :-1]  # (batch_size, num_steps - 1)
         reward_log_vars_sliced = reward_log_vars[:, :-1]  # (batch_size, num_steps - 1)
+        
+        # Clamp log_var to prevent numerical instability
+        reward_log_vars_sliced = torch.clamp(reward_log_vars_sliced, min=-1.5, max=3)
         reward_vars_sliced = reward_log_vars_sliced.exp()
 
-        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').sum(-1).mean()
+        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').mean(-1).mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
@@ -83,6 +86,6 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').sum(-1).mean()
+        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean(-1).mean()
 
         return demonstrations_nll + td_error_nll * td_error_weight
