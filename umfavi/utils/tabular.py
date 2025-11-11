@@ -34,7 +34,7 @@ def q_opt(
     T: NDArray,
     R: NDArray,
     gamma: float,
-    max_iter: int = 1000,
+    max_iter: int = 10000,
     tol: float = 1e-6
 ) -> NDArray:
     """

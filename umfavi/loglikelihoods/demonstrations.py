@@ -82,10 +82,19 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        logits = q_values  # (batch_size, num_steps, n_actions)
+        logits = rationality *q_values  # (batch_size, num_steps, n_actions)
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
         demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean()
 
-        return demonstrations_nll + td_error_nll * td_error_weight
+        # Compute Q-value statistics for logging
+        q_value_max = q_values.max().item()
+        q_value_min = q_values.min().item()
+        
+        metrics = {
+            "q_value_max": q_value_max,
+            "q_value_min": q_value_min,
+        }
+
+        return demonstrations_nll + td_error_nll * td_error_weight, metrics

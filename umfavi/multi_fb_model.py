@@ -28,6 +28,15 @@ class MultiFeedbackTypeModel(nn.Module):
         kwargs["reward_mean"] = mean.squeeze(-1)
         kwargs["reward_log_var"] = log_var.squeeze(-1)
         
-        nll = head(reward_samples, **kwargs)
+        result = head(reward_samples, **kwargs)
+        
+        # Handle decoders that return (loss, metrics) or just loss
+        if isinstance(result, tuple):
+            nll, metrics = result
+        else:
+            nll = result
+            metrics = {}
 
-        return {"negative_log_likelihood": nll, "kl_divergence": kl_div}
+        output = {"negative_log_likelihood": nll, "kl_divergence": kl_div}
+        output.update(metrics)
+        return output

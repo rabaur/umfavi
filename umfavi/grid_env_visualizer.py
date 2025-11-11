@@ -1,13 +1,9 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Callable
-from vsup import VSUP
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.math import log_var_to_std
-from umfavi.metrics.epic import canonically_shaped_reward
-from umfavi.utils.reward import Rsa_to_Rsas
 from umfavi.envs.grid_env.actions import Action
 from torch.utils.data import DataLoader
 
@@ -55,13 +51,14 @@ def visualize_rewards(
     # Create figure with 3 columns: ground truth, state-action distribution, VSUP
     _, axs = plt.subplots(
         nrows=1,
-        ncols=3
+        ncols=4
     )
     
     # Set column titles
     axs[0].set_title("Ground Truth", fontsize=14, fontweight='bold')
     axs[1].set_title("log(Occupancy)", fontsize=14, fontweight='bold')
-    axs[2].set_title("Inferred Reward", fontsize=14, fontweight='bold')
+    axs[2].set_title(r"$\mu$", fontsize=14, fontweight='bold')
+    axs[3].set_title(r"$\sigma$", fontsize=14, fontweight='bold')
     
     # Get reward mean and logvar for each state-action combination
     state_feats_flat = torch.tensor(env.S).to(device=device)
@@ -78,30 +75,20 @@ def visualize_rewards(
     vmin_gt, vmax_gt = np.min(gt_rewards), np.max(gt_rewards)
     vmin_mean, vmax_mean = np.min(mean), np.max(mean)
     vmin_std, vmax_std = np.min(std), np.max(std)
-
-    # Initialize VSUP with desired parameters
-    # mode='usl' = uncertainty-suppressing lightness
-    # palette='viridis' uses the viridis colormap as base
-    vsup = VSUP(palette='viridis', mode='usl')
-        
-    # Normalize mean and variance to [0, 1] range for VSUP
-    mean_normalized = (mean_grid - vmin_mean) / (vmax_mean - vmin_mean + 1e-8)
-    std_normalized = (std_grid - vmin_std) / (vmax_std - vmin_std + 1e-8)
-        
-    # Generate VSUP colors (calling vsup directly returns RGB array)
-    vsup_colors = vsup(mean_normalized, std_normalized)
         
     # Plot ground truth
-    axs[0].imshow(gt_rewards, cmap="viridis", vmin=vmin_gt, vmax=vmax_gt)
+    axs[0].imshow(gt_rewards, vmin=vmin_gt, vmax=vmax_gt)
 
     # Plot ground truth
     visualize_state_action_dist(env, dataloader, axs[1])
         
     # Plot VSUP visualization (combined mean + uncertainty)
-    axs[2].imshow(vsup_colors)
+    axs[2].imshow(mean_grid, vmin=vmin_mean, vmax=vmax_mean)
+
+    axs[3].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
          
     # Remove individual subplot titles and axis labels
-    for col in range(3):
+    for col in range(4):
         axs[col].set_xticks([])
         axs[col].set_yticks([])
     

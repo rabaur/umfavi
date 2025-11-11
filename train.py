@@ -241,6 +241,13 @@ def main(args):
                 "batch/negative_log_likelihood": loss_dict["negative_log_likelihood"].item(),
                 "batch/learning_rate": optimizer.param_groups[0]['lr'],
             }
+            
+            # Log Q-value statistics if available (from demonstration decoder)
+            if "q_value_max" in loss_dict:
+                wandb_log["batch/q_value_max"] = loss_dict["q_value_max"]
+            if "q_value_min" in loss_dict:
+                wandb_log["batch/q_value_min"] = loss_dict["q_value_min"]
+            
             if args.log_wandb:
                 wandb.log(wandb_log, step=global_step)
             
@@ -330,7 +337,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=32, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
