@@ -32,7 +32,8 @@ def visualize_state_action_dist(
                 cell = to_numpy(cell)
                 i, j = int(cell[0]), int(cell[1])
                 counts[i, j] += 1
-    ax.imshow(np.log(counts + 1))
+    im = ax.imshow(np.log(counts + 1))
+    return im
 
 def visualize_rewards(
     env: GridEnv,
@@ -81,15 +82,16 @@ def visualize_rewards(
     vmin_std, vmax_std = np.min(std), np.max(std)
         
     # Plot ground truth
-    axs[0, 0].imshow(gt_rewards, vmin=vmin_gt, vmax=vmax_gt)
+    im1 = axs[0, 0].imshow(gt_rewards, vmin=vmin_gt, vmax=vmax_gt)
 
-    # Plot ground truth
-    visualize_state_action_dist(env, dataloader, axs[0, 1])
+    # Plot log occupancy
+    im2 = visualize_state_action_dist(env, dataloader, axs[0, 1])
         
-    # Plot VSUP visualization (combined mean + uncertainty)
-    axs[1, 0].imshow(mean_grid, vmin=vmin_mean, vmax=vmax_mean)
+    # Plot mean
+    im3 = axs[1, 0].imshow(mean_grid, vmin=vmin_mean, vmax=vmax_mean)
 
-    axs[1, 1].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
+    # Plot std
+    im4 = axs[1, 1].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
          
     # Remove individual subplot titles and axis labels
     for row in range(2):
@@ -97,15 +99,11 @@ def visualize_rewards(
             axs[row, col].set_xticks([])
             axs[row, col].set_yticks([])
     
-    # Add colorbar for ground truth
-    # plt.colorbar(im1, ax=axs[:, 0], label="Reward Value")
+    # Add individual colorbars for each subplot
+    plt.colorbar(im1, ax=axs[0, 0], fraction=0.046, pad=0.04)
+    plt.colorbar(im2, ax=axs[0, 1], fraction=0.046, pad=0.04)
+    plt.colorbar(im3, ax=axs[1, 0], fraction=0.046, pad=0.04)
+    plt.colorbar(im4, ax=axs[1, 1], fraction=0.046, pad=0.04)
     
     plt.tight_layout()
     return fig
-
-
-
-    
-
-    
-    

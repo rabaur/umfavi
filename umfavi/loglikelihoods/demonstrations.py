@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from torch import nn
 from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.utils.math import log_var_to_std
-
 class DemonstrationsDecoder(BaseLogLikelihood):
 
     def __init__(self, Q_value_model: nn.Module):
@@ -68,21 +67,21 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         td_error_selected = td_error_selected.squeeze(-1)  # (batch_size, num_steps - 1)
 
         # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
-        reward_means_sliced = reward_means[:, :-1]  # (batch_size, num_steps - 1)
-        reward_log_vars_sliced = reward_log_vars[:, :-1]  # (batch_size, num_steps - 1)
+        reward_mean_selected = reward_means[:, :-1]  # (batch_size, num_steps - 1)
+        reward_log_var_selected = reward_log_vars[:, :-1]  # (batch_size, num_steps - 1)
         
         # Clamp log_var to prevent numerical instability
-        reward_log_vars_sliced = torch.clamp(reward_log_vars_sliced, min=-1.5, max=3)
-        reward_vars_sliced = reward_log_vars_sliced.exp()
+        reward_std_selected = log_var_to_std(reward_log_var_selected)
 
-        td_error_nll = F.gaussian_nll_loss(reward_means_sliced, td_error_selected, reward_vars_sliced, reduction='none').mean()
+        normal_dist = torch.distributions.Normal(reward_mean_selected, reward_std_selected)
+        td_error_nll = -normal_dist.log_prob(td_error_selected).mean()
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        logits = q_values # rationality *q_values  # (batch_size, num_steps, n_actions)
+        logits = q_values # rationality * q_values  # (batch_size, num_steps, n_actions)
 
         # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
         logits = logits.permute(0, 2, 1)
