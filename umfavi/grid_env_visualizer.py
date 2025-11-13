@@ -43,22 +43,26 @@ def visualize_rewards(
     Visualizes the rewards for a DCT grid environment using VSUP 
     (Value-Suppressing Uncertainty Palette) to combine mean and uncertainty.
     Also displays the canonicalized mean reward.
+    
+    Returns:
+        fig: matplotlib figure object that can be logged to wandb
     """
     grid_size = env.grid_size
     gt_rewards = np.reshape(env.R, (grid_size, grid_size, -1))
     gt_rewards = np.max(gt_rewards, axis=-1)
     
     # Create figure with 3 columns: ground truth, state-action distribution, VSUP
-    _, axs = plt.subplots(
-        nrows=1,
-        ncols=4
+    fig, axs = plt.subplots(
+        nrows=2,
+        ncols=2,
+        figsize=(8, 8)
     )
     
     # Set column titles
-    axs[0].set_title("Ground Truth", fontsize=14, fontweight='bold')
-    axs[1].set_title("log(Occupancy)", fontsize=14, fontweight='bold')
-    axs[2].set_title(r"$\mu$", fontsize=14, fontweight='bold')
-    axs[3].set_title(r"$\sigma$", fontsize=14, fontweight='bold')
+    axs[0, 0].set_title("Ground Truth", fontsize=14)
+    axs[0, 1].set_title("log(Occupancy)", fontsize=14)
+    axs[1, 0].set_title(r"$\mu$", fontsize=14)
+    axs[1, 1].set_title(r"$\sigma$", fontsize=14)
     
     # Get reward mean and logvar for each state-action combination
     state_feats_flat = torch.tensor(env.S).to(device=device)
@@ -77,25 +81,27 @@ def visualize_rewards(
     vmin_std, vmax_std = np.min(std), np.max(std)
         
     # Plot ground truth
-    axs[0].imshow(gt_rewards, vmin=vmin_gt, vmax=vmax_gt)
+    axs[0, 0].imshow(gt_rewards, vmin=vmin_gt, vmax=vmax_gt)
 
     # Plot ground truth
-    visualize_state_action_dist(env, dataloader, axs[1])
+    visualize_state_action_dist(env, dataloader, axs[0, 1])
         
     # Plot VSUP visualization (combined mean + uncertainty)
-    axs[2].imshow(mean_grid, vmin=vmin_mean, vmax=vmax_mean)
+    axs[1, 0].imshow(mean_grid, vmin=vmin_mean, vmax=vmax_mean)
 
-    axs[3].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
+    axs[1, 1].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
          
     # Remove individual subplot titles and axis labels
-    for col in range(4):
-        axs[col].set_xticks([])
-        axs[col].set_yticks([])
+    for row in range(2):
+        for col in range(2):
+            axs[row, col].set_xticks([])
+            axs[row, col].set_yticks([])
     
     # Add colorbar for ground truth
     # plt.colorbar(im1, ax=axs[:, 0], label="Reward Value")
     
-    plt.show()
+    plt.tight_layout()
+    return fig
 
 
 

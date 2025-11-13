@@ -2,6 +2,7 @@ import argparse
 import torch
 import wandb
 import numpy as np
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.data.preference_dataset import PreferenceDataset
@@ -20,27 +21,12 @@ from umfavi.grid_env_visualizer import (
     visualize_rewards
 )
 
-def create_run_name(args):
-    run_name_parts = []
-    for key, value in args.__dict__.items():
-        if isinstance(value, int):
-            run_name_parts.append(f"{key}{value}")
-        elif isinstance(value, float):
-            run_name_parts.append(f"{key}{value:.2f}")
-        else:
-            run_name_parts.append(f"{key}{value}")
-    return "-".join(run_name_parts)
-
-
 def main(args):
-    
-    args.wandb_run_name = create_run_name(args)
     
     # Initialize wandb
     if args.log_wandb:
         wandb.init(
             project=args.wandb_project,
-            name=args.wandb_run_name,
             config=vars(args),
             tags=args.wandb_tags.split(",") if args.wandb_tags else None,
         )
@@ -323,7 +309,16 @@ def main(args):
             # Evaluation
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
-                    visualize_rewards(env, fb_model, device, dataloaders["demonstration"])
+                    fig = visualize_rewards(env, fb_model, device, dataloaders["demonstration"])
+                    # Log to wandb
+                    if args.log_wandb:
+                        wandb.log({
+                            "visualizations/rewards": wandb.Image(fig),
+                            "epoch": epoch,
+                        })
+                    
+                    # Close the figure to free memory
+                    plt.close(fig)
             
             # Set model back to training mode
             fb_model.train()
@@ -373,7 +368,6 @@ if __name__ == "__main__":
     # Wandb parameters
     parser.add_argument("--log_wandb", action="store_true", help="Log to weights and biases")
     parser.add_argument("--wandb_project", type=str, default="var-rew-learning", help="Wandb project name")
-    parser.add_argument("--wandb_run_name", type=str, default=None, help="Wandb run name (default: auto-generated)")
     parser.add_argument("--wandb_tags", type=str, default="", help="Comma-separated wandb tags")
     parser.add_argument("--wandb_watch", action="store_true", help="Enable wandb model watching (logs gradients and parameters)")
     
