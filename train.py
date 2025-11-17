@@ -4,6 +4,7 @@ import wandb
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
+from typing import Any
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.data.preference_dataset import PreferenceDataset
 from umfavi.data.demonstration_dataset import DemonstrationDataset
@@ -15,13 +16,42 @@ from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.features import MLPFeatureModule
 from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
+from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
 from umfavi.grid_env_visualizer import (
     visualize_rewards
 )
 
+def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: str):
+    epoch_log_dict = dict(epoch_log_dict)
+    for key, value in metrics_dict.items():
+        if key in epoch_log_dict:
+            prev_count, prev_val = epoch_log_dict[key]
+            updated_vals = (prev_count + 1, prev_val + value)
+            epoch_log_dict[key] = updated_vals
+            epoch_log_dict[f"{key}_{fb_type}"] = updated_vals
+        else:
+            initial_value = (1, value)
+            epoch_log_dict[key] = initial_value
+            epoch_log_dict[f"{key}_{fb_type}"] = initial_value
+    return epoch_log_dict
+
+
+def epoch_log_dict_to_wandb(epoch_log_dict: dict[str, tuple[int, Any]]):
+    wandb_dict = {}
+    for key, (count, agg_value) in epoch_log_dict.items():
+        if count > 0:
+            wandb_dict[f"epoch/{key}"] = agg_value / count
+        else:
+            wandb_dict[f"epoch/{key}"] = np.nan
+    return wandb_dict
+
+
 def main(args):
+
+    # Reproducibility
+    seed_everything(args.seed)
     
     # Initialize wandb
     if args.log_wandb:
@@ -58,15 +88,24 @@ def main(args):
     if not active_feedback_types:
         raise ValueError("At least one feedback type must have samples > 0")
     
+    # Set up loss weights for each feedback type
+    feedback_weights = {
+        "preference": args.pref_loss_weight,
+        "demonstration": args.demo_loss_weight,
+    }
+    # Only keep weights for active feedback types
+    feedback_weights = {k: v for k, v in feedback_weights.items() if k in active_feedback_types}
+    
     print(f"\nActive feedback types: {list(active_feedback_types.keys())}")
     for fb_type, n_samples in active_feedback_types.items():
-        print(f"  {fb_type}: {n_samples} samples")
+        weight = feedback_weights[fb_type]
+        print(f"  {fb_type}: {n_samples} samples, loss weight: {weight}")
     print()
     
     # Create policies (only if needed)
     policies_created = set()
 
-    preference_policy = ExpertPolicy(env=env, rationality=0.5, gamma=args.gamma)
+    preference_policy = ExpertPolicy(env=env, rationality=0.1, gamma=args.gamma)
     policies_created.add("preference")
     demonstration_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
     policies_created.add("demonstration")
@@ -83,6 +122,7 @@ def main(args):
             policy=preference_policy,
             device=device,
             rationality=args.pref_rationality,
+            gamma=args.gamma,
         )
         datasets["preference"] = pref_dataset
         dataloaders["preference"] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
@@ -107,6 +147,7 @@ def main(args):
     obs_dim = env.observation_space["state_features"].shape[0]
     act_dim = env.action_space.n
     learn_embedding = args.state_feature_type == "embedding"
+
     feature_module = MLPFeatureModule(
         obs_dim,
         act_dim,
@@ -122,33 +163,33 @@ def main(args):
 
     # Create decoders only for active feedback types
     decoders = {}
+
+    Q_value_model = MLPFeatureModule(
+        state_dim=obs_dim,
+        action_dim=act_dim,  # Not used since reward_domain='s'
+        learn_embedding=learn_embedding,
+        hidden_sizes=args.q_value_hidden_sizes + [act_dim],
+        state_embedding_size=args.state_embedding_size,
+        action_embedding_size=args.action_embedding_size,
+        n_states=n_states,
+        n_actions=n_actions,
+        reward_domain='s', # Q-value model only acts on state features
+        activate_last_layer=False
+    )
     
     if "preference" in active_feedback_types:
         preference_decoder = PreferenceDecoder()
         decoders["preference"] = preference_decoder
-        print("Created preference decoder")
     
     if "demonstration" in active_feedback_types:
         # Q-value model is just MLPFeatureModule with reward_domain='s' and last layer = n_actions
-        q_value_model = MLPFeatureModule(
-            state_dim=obs_dim,
-            action_dim=act_dim,  # Not used since reward_domain='s'
-            learn_embedding=learn_embedding,
-            hidden_sizes=args.q_value_hidden_sizes + [act_dim],
-            state_embedding_size=args.state_embedding_size,
-            action_embedding_size=args.action_embedding_size,
-            n_states=n_states,
-            n_actions=n_actions,
-            reward_domain='s',
-            activate_last_layer=False
-        )
-        demonstration_decoder = DemonstrationsDecoder(q_value_model)
+        demonstration_decoder = DemonstrationsDecoder()
         decoders["demonstration"] = demonstration_decoder
-        print("Created demonstration decoder")
     
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
         encoder=reward_encoder,
+        Q_value_model=Q_value_model,
         decoders=decoders
     )
     fb_model.to(device)
@@ -157,21 +198,24 @@ def main(args):
     if args.log_wandb:
         wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in dataloaders.items()}
-    
     
     print(f"Training info:")
     for fb_type, length in dataloader_lengths.items():
         print(f"  {fb_type}: {length} batches per epoch")
     print(f"  Batches processed per update: {len(dataloaders)}")
 
+    # Initialize dataloader iterators for each feedback type
     dloader_iters = {k: iter(dataloaders[k]) for k in active_feedback_types}
-    total_data_len = sum(len(dset) for dset in datasets.values())
-    steps_per_epoch = total_data_len // args.batch_size
-    sampling_probs = [len(datasets[k]) / total_data_len for k in active_feedback_types]
+    
+    # Steps per epoch is determined by the feedback type with the most batches
+    steps_per_epoch = max(len(dl) for dl in dataloaders.values())
+    
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Processing {len(active_feedback_types)} feedback type(s) per step\n")
 
     for epoch in range(args.num_epochs):
         
@@ -179,94 +223,81 @@ def main(args):
         fb_model.train()
         
         # Track losses per feedback type
-        total_loss = 0
-        loss_sums = {fb_type: 0.0 for fb_type in dataloaders.keys()}
-        kl_div_sum = 0.0
-        nll_sum = 0.0
+        epoch_log_dict = {}
         
         for step in range(steps_per_epoch):
 
-            fb_type = np.random.choice(list(active_feedback_types), p=sampling_probs)
+            # Calculate global step for wandb logging
+            global_step = epoch * steps_per_epoch + step
 
-            try:
-                batch = next(dloader_iters[fb_type])
-            except StopIteration:
-                dloader_iters[fb_type] = iter(dataloaders[fb_type])
-                batch = next(dloader_iters[fb_type])
+            # Process all feedback types in this step
+            total_loss = 0.0
+            aggregated_loss_dict = {}
             
-            # visualize_batch(batch, env.grid_size)
+            for fb_type in active_feedback_types:
+                # Get next batch for this feedback type
+                try:
+                    batch = next(dloader_iters[fb_type])
+                except StopIteration:
+                    # Restart iterator if we've exhausted this dataloader
+                    dloader_iters[fb_type] = iter(dataloaders[fb_type])
+                    batch = next(dloader_iters[fb_type])
+                
+                # Forward pass
+                loss_dict = fb_model(**batch)
+                
+                # Compute ELBO loss for this feedback type
+                fb_loss = elbo_loss(
+                    loss_dict["negative_log_likelihood"], 
+                    loss_dict["kl_divergence"], 
+                    kl_weight=args.kl_weight
+                )
+                
+                # Add regularization
+                fb_loss += args.td_error_weight * loss_dict["td_error"]
+                
+                # Apply feedback-type-specific weight
+                weighted_fb_loss = feedback_weights[fb_type] * fb_loss
+                
+                # Accumulate loss (will backprop once after all feedback types)
+                total_loss += weighted_fb_loss
+                
+                # Aggregate loss dict for logging
+                for key, value in loss_dict.items():
+                    if key not in aggregated_loss_dict:
+                        aggregated_loss_dict[key] = 0.0
+                    aggregated_loss_dict[key] += value.item() if torch.is_tensor(value) else value
+                    
+                    # Also track per-feedback-type metrics
+                    fb_key = f"{key}_{fb_type}"
+                    if fb_key not in aggregated_loss_dict:
+                        aggregated_loss_dict[fb_key] = 0.0
+                    aggregated_loss_dict[fb_key] += value.item() if torch.is_tensor(value) else value
+                
+                # Update epoch log dict for this feedback type
+                epoch_log_dict = update_epoch_log_dict(epoch_log_dict, loss_dict, fb_type)
             
-            # Forward pass
-            loss_dict = fb_model(**batch)
-            loss = elbo_loss(
-                loss_dict["negative_log_likelihood"], 
-                loss_dict["kl_divergence"], 
-                kl_weight=args.kl_weight
-            )
-            
-            # Backpropagate
-            loss.backward()
+            # Backpropagate combined loss
+            total_loss.backward()
             
             # Single optimizer step after processing all feedback types
             optimizer.step()
             optimizer.zero_grad()
+            
+            # Log to wandb every N steps
+            if (global_step) % args.log_every_n_steps == 0:
+                if args.log_wandb:
+                    wandb_log_dict = {f"batch/{key}": value for key, value in aggregated_loss_dict.items()}
+                    wandb_log_dict["batch/total_loss"] = total_loss.item()
+                    wandb.log(wandb_log_dict, step=global_step)
 
-            # Track losses
-            loss_sums[fb_type] += loss.item()
-            
-            kl_div_sum += loss_dict["kl_divergence"].item()
-            nll_sum += loss_dict["negative_log_likelihood"].item()
-            
-            # Calculate global step for wandb logging
-            global_step = epoch * steps_per_epoch + step
-            
-            # Log to wandb every batch
-            wandb_log = {
-                "batch/total_loss": loss.item(),
-                "batch/kl_divergence": loss_dict["kl_divergence"].item(),
-                "batch/negative_log_likelihood": loss_dict["negative_log_likelihood"].item(),
-                "batch/learning_rate": optimizer.param_groups[0]['lr'],
-            }
-            
-            # Log Q-value statistics if available (from demonstration decoder)
-            if "q_value_max" in loss_dict:
-                wandb_log["batch/q_value_max"] = loss_dict["q_value_max"]
-            if "q_value_min" in loss_dict:
-                wandb_log["batch/q_value_min"] = loss_dict["q_value_min"]
-            
-            if args.log_wandb:
-                wandb.log(wandb_log, step=global_step)
-            
-            # Log every few batches to console
-            if (step + 1) % max(1, steps_per_epoch // 10) == 0:
-                avg_kl = kl_div_sum / (step + 1)
-                avg_nll = nll_sum / (step + 1)
-                log_parts = [f"Epoch {epoch}, Batch {step + 1}/{steps_per_epoch}"]
-                for fb_type in sorted(dataloaders.keys()):
-                    avg_loss = loss_sums[fb_type] / (step + 1)
-                    log_parts.append(f"{fb_type.capitalize()}: {avg_loss:.4f}")
-                log_parts.append(f"KL: {avg_kl:.4f}")
-                log_parts.append(f"NLL: {avg_nll:.4f}")
-                print(" - ".join(log_parts))
-        
-        # Epoch summary
-        avg_total_loss = total_loss / steps_per_epoch
-        avg_kl_div = kl_div_sum / steps_per_epoch
-        avg_nll = nll_sum / steps_per_epoch
-        
-        summary_parts = [f"\nEpoch {epoch} Summary - Total: {avg_total_loss:.4f}"]
-        for fb_type in sorted(dataloaders.keys()):
-            avg_loss = loss_sums[fb_type] / steps_per_epoch
-            summary_parts.append(f"{fb_type.capitalize()}: {avg_loss:.4f}")
-        summary_parts.append(f"KL: {avg_kl_div:.4f}")
-        summary_parts.append(f"NLL: {avg_nll:.4f}")
-        print(", ".join(summary_parts) + "\n")
-        
         # -----------------------------------------------
         # Evaluation
         # -----------------------------------------------
         if epoch % args.eval_every_n_epochs == 0:
+            
             fb_model.eval()
+            eval_metrics = {}
             with torch.no_grad():
 
                 # Compute the mean estimated reward per state-action pair
@@ -281,10 +312,11 @@ def main(args):
                     R_true=env.R,
                     R_est=R_est,
                     gamma=args.gamma)
+                eval_metrics["epic_distance"] = epic_dist
                 
                 # Compute expected regret
                 regret = evaluate_regret(R_est=R_est, R_true=env.R, P=env.P, gamma=args.gamma)
-
+                eval_metrics["regret"] = regret
 
             # Log to wandb
             if args.log_wandb:
@@ -292,30 +324,21 @@ def main(args):
                     "eval/epic_distance": epic_dist,
                     "eval/expected_regret": regret,
                     "epoch": epoch,
-                })
+                }, step=global_step)
 
-                epoch_log = {
-                    "epoch/loss": avg_total_loss,
-                    "epoch/kl_divergence": avg_kl_div,
-                    "epoch/negative_log_likelihood": avg_nll,
-                    "epoch/learning_rate": optimizer.param_groups[0]['lr'],
-                    "epoch": epoch,
-                }
-                # Log per-feedback-type epoch averages
-                for fb_type in dataloaders.keys():
-                    epoch_log[f"epoch/loss_{fb_type}"] = loss_sums[fb_type] / steps_per_epoch
-                wandb.log(epoch_log, step=global_step)
+                epoch_log_dict_wandb = epoch_log_dict_to_wandb(epoch_log_dict)
+                wandb.log(epoch_log_dict_wandb, step=global_step)
         
             # Evaluation
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
-                    fig = visualize_rewards(env, fb_model, device, dataloaders["demonstration"])
+                    fig = visualize_rewards(env, fb_model, device, dataloaders[fb_type])
                     # Log to wandb
                     if args.log_wandb:
                         wandb.log({
                             "visualizations/rewards": wandb.Image(fig),
                             "epoch": epoch,
-                        })
+                        }, step=global_step)
                     
                     # Close the figure to free memory
                     plt.close(fig)
@@ -330,11 +353,15 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    # Reproducibility
+    parser.add_argument("--seed", type=int, default=0, help="Global seed")
+    
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=64, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=69, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=128, help="Length of each trajectory")
+    parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
@@ -345,9 +372,11 @@ if __name__ == "__main__":
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=42)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
+    parser.add_argument("--pref_loss_weight", type=float, default=1.0, help="Weight for preference feedback loss")
+    parser.add_argument("--demo_loss_weight", type=float, default=1.0, help="Weight for demonstration feedback loss")
     parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
@@ -356,10 +385,10 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=10)
     parser.add_argument("--reward_type", type=str, default="sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="embedding", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
+    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
     parser.add_argument("--state_embedding_size", type=int, default=32, help="Only used if state_feature_type=='embedding'")
-    parser.add_argument("--action_feature_type", type=str, default="embedding", help="Type of action feature encoding (one_hot, embedding)")
+    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot, embedding)")
     parser.add_argument("--action_embedding_size", type=int, default=8, help="Only used if state_feature_type=='embedding")
     
     # Visualization parameters
@@ -367,6 +396,7 @@ if __name__ == "__main__":
     
     # Wandb parameters
     parser.add_argument("--log_wandb", action="store_true", help="Log to weights and biases")
+    parser.add_argument("--log_every_n_steps", type=int, default=10, help="Log every n steps")
     parser.add_argument("--wandb_project", type=str, default="var-rew-learning", help="Wandb project name")
     parser.add_argument("--wandb_tags", type=str, default="", help="Comma-separated wandb tags")
     parser.add_argument("--wandb_watch", action="store_true", help="Enable wandb model watching (logs gradients and parameters)")

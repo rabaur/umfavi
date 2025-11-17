@@ -24,14 +24,41 @@ def visualize_state_action_dist(
     ax: plt.Axes
 ):
     N = env.grid_size
-    counts = np.zeros((N, N))
+    device = None
+    counts_flat = None  # will hold counts over N*N cells
+
     for batch in dataloader:
-        states = batch["states"]
-        for traj in states:
-            for cell in traj:
-                cell = to_numpy(cell)
-                i, j = int(cell[0]), int(cell[1])
-                counts[i, j] += 1
+        states = batch["states"]          # shape: (..., 2) where last dim is (row, col)
+        # ensure tensor
+        if not isinstance(states, torch.Tensor):
+            states = torch.as_tensor(states)
+
+        if device is None:
+            device = states.device
+            counts_flat = torch.zeros(N * N, dtype=torch.long, device=device)
+
+        # collapse all leading dims, keep last dim 2
+        # works for (T, 2), (2, T, 2), (B, T, 2), (B, 2, T, 2), etc.
+        idxs = states.reshape(-1, 2)
+
+        rows = idxs[:, 0].long()
+        cols = idxs[:, 1].long()
+
+        # optional safety in case something is slightly out of bounds
+        rows = rows.clamp(0, N - 1)
+        cols = cols.clamp(0, N - 1)
+
+        # map 2D indices to flat indices
+        flat_idx = rows * N + cols
+
+        # count occurrences in this batch
+        batch_counts = torch.bincount(flat_idx, minlength=N * N)
+
+        # accumulate
+        counts_flat += batch_counts
+
+    # reshape to 2D and move to numpy for plotting
+    counts = counts_flat.view(N, N).cpu().numpy()
     im = ax.imshow(np.log(counts + 1))
     return im
 

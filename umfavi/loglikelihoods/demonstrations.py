@@ -5,13 +5,12 @@ from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.utils.math import log_var_to_std
 class DemonstrationsDecoder(BaseLogLikelihood):
 
-    def __init__(self, Q_value_model: nn.Module):
+    def __init__(self):
         """
         Args:
             Q_value_model: Q-value model, mapping states to Q-value estimates for all actions, i.e., Q : S -> R^{n_actions}.
         """
         super().__init__()
-        self.Q_value_model = Q_value_model
 
     def forward(self, reward_samples: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -44,13 +43,13 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         td_error_weight = kwargs["td_error_weight"][0].item()
 
         # Get the Q-value estimates
-        q_values = self.Q_value_model(state_feats)  # (batch_size, num_steps, n_actions)
+        q_values = kwargs["q_values"]  # (batch_size, num_steps, n_actions)
 
         # ------------------------------------------------------------------------------------------------
         # TD-error constraint
         # ------------------------------------------------------------------------------------------------
 
-        # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s_t, a_t) - γ * Q(s', a')]
+        # Compute the TD-error: R(s_t, a_t) = E_{s',a'~pi,T}[Q(s, a) - γ * Q(s', a')]
         
         # current and next state-action pairs
         acts_curr = acts[:, :-1]  # (batch_size, num_steps - 1) - actions at time t

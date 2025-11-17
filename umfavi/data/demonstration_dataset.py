@@ -42,13 +42,14 @@ class DemonstrationDataset(Dataset):
         self.device = device
         self.rationality = rationality
         self.gamma = gamma
+        self.td_error_weight = td_error_weight
+        
         # Generate demonstrations
         demos = self.generate_demonstrations(policy=policy)
         self.state_feats = demos["state_feats"]
         self.states = demos["states"]
         self.act_feats = demos["act_feats"]
         self.acts = demos["acts"]
-        self.td_error_weight = td_error_weight
     
     def generate_demonstrations(self, policy: Callable) -> dict:
         """
@@ -111,14 +112,14 @@ class DemonstrationDataset(Dataset):
         act_feats = self.act_feats[idx][:-1]
         
         # Convert observations to tensors
-        state_feats_tensor = torch.tensor(state_feats).to(self.device)
-        next_state_feats_tensor = torch.tensor(next_state_feats).to(self.device)
-        states_tensor = torch.tensor(states).to(self.device)
-        next_states_tensor = torch.tensor(next_states).to(self.device)
+        state_feats_tensor = torch.tensor(np.array(state_feats)).to(self.device)
+        next_state_feats_tensor = torch.tensor(np.array(next_state_feats)).to(self.device)
+        states_tensor = torch.tensor(np.array(states)).to(self.device)
+        next_states_tensor = torch.tensor(np.array(next_states)).to(self.device)
 
         # Convert actions to tensors
-        acts_tensor = torch.tensor(acts).to(self.device)
-        act_feats_tensor = torch.tensor(act_feats).to(self.device)
+        acts_tensor = torch.tensor(np.array(acts)).to(self.device)
+        act_feats_tensor = torch.tensor(np.array(act_feats)).to(self.device)
         
         return {
             "feedback_type": "demonstration",
@@ -130,6 +131,6 @@ class DemonstrationDataset(Dataset):
             "action_features": act_feats_tensor,
             "targets": acts_tensor,
             "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
-            "gamma": self.gamma,
+            "gamma": torch.tensor(self.gamma).to(self.device, dtype=torch.float32),
             "td_error_weight": torch.tensor(self.td_error_weight).to(self.device, dtype=torch.float32),
         }
