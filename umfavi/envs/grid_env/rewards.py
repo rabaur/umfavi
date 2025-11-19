@@ -21,9 +21,9 @@ def succ_state(i: int, j: int, a: Action, grid_size: int):
 def to_flat_idx(i: int, j: int, grid_size):
     return i * grid_size + j
 
-def reward_sparse(grid_size: int, goal_position: tuple[int, int]):
+def reward_sparse(grid_size: int, goal_position: tuple[int, int], goal_val: float):
     R1d = np.zeros((grid_size, grid_size))
-    R1d[goal_position[0], goal_position[1]] = 1
+    R1d[goal_position[0], goal_position[1]] = goal_val
     R1d = np.reshape(R1d, (grid_size**2))
     R3d = Rs_to_Rsas(R1d, 5)
     return R3d
@@ -45,6 +45,19 @@ def reward_dense(grid_size: int, gamma: float):
     # Shaping
     return shape(R3d_base, f, gamma)
 
+def reward_path(
+    grid_size: int,
+    base_val: float,
+    top_path_val: float,
+    bottom_path_val: float,
+    goal_val: float):
+    R1d = np.full((grid_size, grid_size), base_val)
+    R1d[0, 1:] = top_path_val
+    R1d[-1,:-1] = bottom_path_val
+    R1d[-1, -1] = goal_val
+    R1d = R1d.reshape(grid_size**2)
+    return Rs_to_Rsas(R1d, 5)
+
 def reward_factory(grid_size: int, reward_type: str, gamma: float):
     """
     Creates reward tables for the grid environment of different types.
@@ -56,11 +69,17 @@ def reward_factory(grid_size: int, reward_type: str, gamma: float):
     n_A = 5
     R = np.zeros((n_S, n_A, n_S))
     if reward_type == "sparse":
-        R = reward_sparse(grid_size, goal_position=(grid_size - 1, grid_size - 1))
+        R = reward_sparse(grid_size, goal_position=(grid_size - 1, grid_size - 1), goal_val=1.0)
     elif reward_type == "dense":
         R = reward_dense(grid_size, gamma)
     elif reward_type == "center":
-        R = reward_sparse(grid_size, goal_position=(grid_size // 2, grid_size // 2))
+        R = reward_sparse(grid_size, goal_position=(grid_size // 2, grid_size // 2), goal_val=1.0)
+    elif reward_type == "penalty":
+        R = reward_sparse(grid_size, goal_position=(grid_size - 1, grid_size - 1), goal_val=-1)
+    elif reward_type == "path":
+        R = reward_path(grid_size, 0, -1, -1, 4)
+    elif reward_type == "cliff":
+        R = reward_path(grid_size, 0, -1, -4, 4)
     else:
         raise NotImplementedError(f"Reward type {reward_type} is not implemented")
     return R

@@ -88,20 +88,6 @@ def main(args):
     if not active_feedback_types:
         raise ValueError("At least one feedback type must have samples > 0")
     
-    # Set up loss weights for each feedback type
-    feedback_weights = {
-        "preference": args.pref_loss_weight,
-        "demonstration": args.demo_loss_weight,
-    }
-    # Only keep weights for active feedback types
-    feedback_weights = {k: v for k, v in feedback_weights.items() if k in active_feedback_types}
-    
-    print(f"\nActive feedback types: {list(active_feedback_types.keys())}")
-    for fb_type, n_samples in active_feedback_types.items():
-        weight = feedback_weights[fb_type]
-        print(f"  {fb_type}: {n_samples} samples, loss weight: {weight}")
-    print()
-    
     # Create policies (only if needed)
     policies_created = set()
 
@@ -256,11 +242,8 @@ def main(args):
                 # Add regularization
                 fb_loss += args.td_error_weight * loss_dict["td_error"]
                 
-                # Apply feedback-type-specific weight
-                weighted_fb_loss = feedback_weights[fb_type] * fb_loss
-                
                 # Accumulate loss (will backprop once after all feedback types)
-                total_loss += weighted_fb_loss
+                total_loss += fb_loss
                 
                 # Aggregate loss dict for logging
                 for key, value in loss_dict.items():
@@ -375,8 +358,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=42)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
-    parser.add_argument("--pref_loss_weight", type=float, default=1.0, help="Weight for preference feedback loss")
-    parser.add_argument("--demo_loss_weight", type=float, default=1.0, help="Weight for demonstration feedback loss")
     parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
