@@ -8,7 +8,7 @@ from umfavi.regularizer.td_error import td_error_regularizer
 
 class MultiFeedbackTypeModel(nn.Module):
 
-    def __init__(self, encoder: BaseRewardEncoder, Q_value_model: nn.Module, decoders: dict[str, BaseLogLikelihood]):
+    def __init__(self, encoder: BaseRewardEncoder, Q_value_model: nn.Module, decoders: dict[FeedbackType, BaseLogLikelihood]):
         super().__init__()
         self.encoder = encoder
         self.Q_value_model = Q_value_model

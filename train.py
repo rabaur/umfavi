@@ -19,9 +19,62 @@ from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
-from umfavi.grid_env_visualizer import (
-    visualize_rewards
-)
+from umfavi.grid_env_visualizer import visualize_rewards
+from umfavi.feedback_types import FeedbackType
+
+
+def dataset_factory(active_feedback_types, args, env, policies, device):
+    datasets = {}
+    dataloaders = {}
+    if FeedbackType.Preference in active_feedback_types:
+        pref_dataset = PreferenceDataset(
+            n_samples=args.num_pref_samples,
+            n_steps=args.num_steps,
+            env=env,
+            policy=policies[FeedbackType.Preference],
+            device=device,
+            rationality=args.pref_rationality,
+            gamma=args.gamma,
+        )
+        datasets[FeedbackType.Preference] = pref_dataset
+        dataloaders[FeedbackType.Preference] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
+        print(f"Created preference dataset with {len(pref_dataset)} samples")
+
+    if FeedbackType.Demonstration in active_feedback_types:
+        demo_dataset = DemonstrationDataset(
+            n_samples=args.num_demo_samples,
+            n_steps=args.num_steps,
+            env=env,
+            policy=policies[FeedbackType.Demonstration],
+            device=device,
+            rationality=args.expert_rationality,
+            gamma=args.gamma,
+            td_error_weight=args.td_error_weight,
+        )
+        datasets[FeedbackType.Demonstration] = demo_dataset
+        dataloaders[FeedbackType.Demonstration] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
+        print(f"Created demonstration dataset with {len(demo_dataset)} samples")
+
+
+def get_batch(dloader_iters, dataloaders, fb_type):
+    try:
+        batch = next(dloader_iters[fb_type])
+    except StopIteration:
+        # Restart iterator if we've exhausted this dataloader
+        dloader_iters[fb_type] = iter(dataloaders[fb_type])
+        batch = next(dloader_iters[fb_type])
+    return batch
+
+
+def compute_eval_loss(val_dataloaders, active_feedback_types, multi_fb_model: MultiFeedbackTypeModel):
+    assert not multi_fb_model.training, "Model is not in evaluation mode"
+    dloader_iters = {fb_type: iter(val_dataloaders[fb_type]) for fb_type in active_feedback_types}
+    eval_loss_dict
+    for fb_type in active_feedback_types:
+        batch = get_batch(dloader_iters, val_dataloaders, fb_type)
+        loss
+
+
 
 def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: str):
     epoch_log_dict = dict(epoch_log_dict)
@@ -60,15 +113,12 @@ def main(args):
             config=vars(args),
             tags=args.wandb_tags.split(",") if args.wandb_tags else None,
         )
-        print(f"Wandb run: {wandb.run.name if wandb.run else 'N/A'}")
-        print(f"Wandb URL: {wandb.run.url if wandb.run else 'N/A'}\n")
 
     env = GridEnv(
         **vars(args),
     )
 
     device = get_device()
-    print(f"Using device: {device}")
         
     # Get all state-action features for evaluation
     n_states = env.S.shape[0]
@@ -78,8 +128,8 @@ def main(args):
 
     # Register feedback types and their sample counts
     feedback_config = {
-        "preference": args.num_pref_samples,
-        "demonstration": args.num_demo_samples,
+        FeedbackType.Preference: args.num_pref_samples,
+        FeedbackType.Demonstration: args.num_demo_samples,
     }
     
     # Filter out feedback types with 0 samples
@@ -88,46 +138,14 @@ def main(args):
     if not active_feedback_types:
         raise ValueError("At least one feedback type must have samples > 0")
     
-    # Create policies (only if needed)
-    policies_created = set()
-
-    preference_policy = ExpertPolicy(env=env, rationality=0.1, gamma=args.gamma)
-    policies_created.add("preference")
-    demonstration_policy = ExpertPolicy(env=env, rationality=args.expert_rationality, gamma=args.gamma)
-    policies_created.add("demonstration")
+    # Create policies
+    policies = {}
+    policies[FeedbackType.Preference] = ExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
+    policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
     
     # Create datasets and dataloaders
-    datasets = {}
-    dataloaders = {}
-    
-    if "preference" in active_feedback_types:
-        pref_dataset = PreferenceDataset(
-            n_samples=args.num_pref_samples,
-            n_steps=args.num_steps,
-            env=env,
-            policy=preference_policy,
-            device=device,
-            rationality=args.pref_rationality,
-            gamma=args.gamma,
-        )
-        datasets["preference"] = pref_dataset
-        dataloaders["preference"] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
-        print(f"Created preference dataset with {len(pref_dataset)} samples")
-    
-    if "demonstration" in active_feedback_types:
-        demo_dataset = DemonstrationDataset(
-            n_samples=args.num_demo_samples,
-            n_steps=args.num_steps,
-            env=env,
-            policy=demonstration_policy,
-            device=device,
-            rationality=args.expert_rationality,
-            gamma=args.gamma,
-            td_error_weight=args.td_error_weight,
-        )
-        datasets["demonstration"] = demo_dataset
-        dataloaders["demonstration"] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
-        print(f"Created demonstration dataset with {len(demo_dataset)} samples")
+    _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies)
+    _, eval_dataloaders = dataset_factory(active_feedback_types, args, env, policies)
 
     # Create feature module and encoder
     obs_dim = env.observation_space["state_features"].shape[0]
@@ -163,14 +181,14 @@ def main(args):
         activate_last_layer=False  # Q-values are in R
     )
     
-    if "preference" in active_feedback_types:
+    if FeedbackType.Preference in active_feedback_types:
         preference_decoder = PreferenceDecoder()
-        decoders["preference"] = preference_decoder
+        decoders[FeedbackType.Preference] = preference_decoder
     
-    if "demonstration" in active_feedback_types:
+    if FeedbackType.Demonstration in active_feedback_types:
         # Q-value model is just MLPFeatureModule with reward_domain='s' and last layer = n_actions
         demonstration_decoder = DemonstrationsDecoder()
-        decoders["demonstration"] = demonstration_decoder
+        decoders[FeedbackType.Demonstration] = demonstration_decoder
     
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
@@ -187,21 +205,18 @@ def main(args):
     optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
-    dataloader_lengths = {fb_type: len(dl) for fb_type, dl in dataloaders.items()}
+    dataloader_lengths = {fb_type: len(dl) for fb_type, dl in train_dataloaders.items()}
     
     print(f"Training info:")
     for fb_type, length in dataloader_lengths.items():
         print(f"  {fb_type}: {length} batches per epoch")
-    print(f"  Batches processed per update: {len(dataloaders)}")
+    print(f"  Batches processed per update: {len(train_dataloaders)}")
 
     # Initialize dataloader iterators for each feedback type
-    dloader_iters = {k: iter(dataloaders[k]) for k in active_feedback_types}
+    dloader_iters = {k: iter(train_dataloaders[k]) for k in active_feedback_types}
     
     # Steps per epoch is determined by the feedback type with the most batches
-    steps_per_epoch = max(len(dl) for dl in dataloaders.values())
-    
-    print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Processing {len(active_feedback_types)} feedback type(s) per step\n")
+    steps_per_epoch = max(len(dl) for dl in train_dataloaders.values())
 
     for epoch in range(args.num_epochs):
         
@@ -215,19 +230,15 @@ def main(args):
 
             # Calculate global step for wandb logging
             global_step = epoch * steps_per_epoch + step
+            relative_step = global_step / steps_per_epoch
 
             # Process all feedback types in this step
             total_loss = 0.0
             aggregated_loss_dict = {}
             
             for fb_type in active_feedback_types:
-                # Get next batch for this feedback type
-                try:
-                    batch = next(dloader_iters[fb_type])
-                except StopIteration:
-                    # Restart iterator if we've exhausted this dataloader
-                    dloader_iters[fb_type] = iter(dataloaders[fb_type])
-                    batch = next(dloader_iters[fb_type])
+    
+                batch = get_batch(dloader_iters, train_dataloaders, fb_type)
                 
                 # Forward pass
                 loss_dict = fb_model(**batch)
@@ -240,10 +251,7 @@ def main(args):
                 )
                 
                 # Add regularization
-                fb_loss += args.td_error_weight * loss_dict["td_error"]
-                
-                # Accumulate loss (will backprop once after all feedback types)
-                total_loss += fb_loss
+                total_loss = fb_loss + args.td_error_weight * loss_dict["td_error"]
                 
                 # Aggregate loss dict for logging
                 for key, value in loss_dict.items():
@@ -272,7 +280,8 @@ def main(args):
                 if args.log_wandb:
                     wandb_log_dict = {f"batch/{key}": value for key, value in aggregated_loss_dict.items()}
                     wandb_log_dict["batch/total_loss"] = total_loss.item()
-                    wandb.log(wandb_log_dict, step=global_step)
+                    wandb_log_dict["global_step"] = global_step
+                    wandb.log(wandb_log_dict, step=relative_step)
 
         # -----------------------------------------------
         # Evaluation
@@ -307,7 +316,8 @@ def main(args):
                     "eval/epic_distance": epic_dist,
                     "eval/expected_regret": regret,
                     "epoch": epoch,
-                }, step=global_step)
+                    "global_step": global_step,
+                }, step=relative_step)
 
                 epoch_log_dict_wandb = epoch_log_dict_to_wandb(epoch_log_dict)
                 wandb.log(epoch_log_dict_wandb, step=global_step)
@@ -315,7 +325,7 @@ def main(args):
             # Evaluation
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
-                    fig = visualize_rewards(env, fb_model, device, dataloaders[fb_type])
+                    fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type])
                     # Log to wandb
                     if args.log_wandb:
                         wandb.log({
@@ -348,8 +358,9 @@ if __name__ == "__main__":
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
-    parser.add_argument("--pref_rationality", type=float, default=2.0, help="Rationality for preference generation")
-    parser.add_argument("--expert_rationality", type=float, default=10.0, help="Rationality for expert policy")
+    parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality for the expert policy generating the comparison trajectories")
+    parser.add_argument("--demo_rationality", type=float, default=5.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
