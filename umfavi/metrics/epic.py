@@ -1,4 +1,3 @@
-import torch
 import numpy as np
 from typing import Optional
 from numpy.typing import NDArray
@@ -19,9 +18,9 @@ def canonically_shaped_reward(R_sas: NDArray, gamma: float, d_S: Optional[NDArra
     Returns:
         The canonicalized reward.
     """
-    assert len(R_sas.shape) == 3
+    assert len(R_sas.shape) == 3, f"Expect `R_sas` to be 3-dim, but was {R_sas.shape=}"
     S, A, Sp = R_sas.shape
-    assert S == Sp, "Last dim ust equal number of states"
+    assert S == Sp, "Last dim must equal number of states"
     if not d_S:
         d_S = np.ones(S) / S
     if not d_A:

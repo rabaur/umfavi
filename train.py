@@ -173,8 +173,8 @@ def main(args):
         action_embedding_size=args.action_embedding_size,
         n_states=n_states,
         n_actions=n_actions,
-        reward_domain='s', # Q-value model only acts on state features
-        activate_last_layer=False
+        reward_domain='s',  # Q-value model only acts on state features
+        activate_last_layer=False  # Q-values are in R
     )
     
     if "preference" in active_feedback_types:

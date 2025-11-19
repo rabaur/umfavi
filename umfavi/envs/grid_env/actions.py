@@ -9,7 +9,7 @@ class Action(IntEnum):
     DOWN = 3
     STAY = 4
 
-action_diffs_coords = {
+ACTION_DELTA = {
     Action.RIGHT: np.array([0, 1]),
     Action.UP: np.array([-1, 0]),
     Action.LEFT: np.array([0, -1]),

@@ -80,7 +80,6 @@ class PreferenceDataset(Dataset):
 
             # Generate preference using sigmoid
             preference_prob = sigmoid(self.rationality * (rew_sum2 - rew_sum1))
-            pref = np.random.binomial(1, preference_prob)
             
             # Append the newly generated trajectories
             preferences["state_feats"].append(np.stack([traj1_data["state_feats"], traj2_data["state_feats"]], axis=0))

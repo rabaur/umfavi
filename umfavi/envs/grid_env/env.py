@@ -1,19 +1,10 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-from umfavi.envs.grid_env.actions import Action, action_diffs_coords
+from umfavi.envs.grid_env.actions import Action
 from umfavi.envs.grid_env.state_features import state_feature_factory
 from umfavi.envs.grid_env.action_features import action_feature_factory
-from umfavi.envs.grid_env.rewards import reward_factory
-
-def succ_state_deterministic(i: int, j: int, a: Action, grid_size: int):
-    """Implements boundary checks and returns the successor state for a deterministic action."""
-    s_diff = action_diffs_coords[a]
-    i_new = i + s_diff[0]
-    j_new = j + s_diff[1]
-    if i_new < 0 or i_new >= grid_size or j_new < 0 or j_new >= grid_size:
-        return i, j
-    return i_new, j_new
+from umfavi.envs.grid_env.rewards import reward_factory, succ_state
 
 def construct_grid_env(
     grid_size: int,
@@ -54,7 +45,7 @@ def construct_grid_env(
             s = i * grid_size + j
             for a in range(n_A):
                 for a_prime in range(n_A): # all the other actions that could be taken at random
-                    i_prime, j_prime = succ_state_deterministic(i, j, Action(a_prime), grid_size)
+                    i_prime, j_prime = succ_state(i, j, Action(a_prime), grid_size)
                     s_prime = i_prime * grid_size + j_prime
                     
                     # If this is the intended action, we go to the new state with probability 1 - p_rand
@@ -142,7 +133,7 @@ class GridEnv(gym.Env):
     def step(self, action):
         # update (i,j) deterministically or with randomness
         i, j = self.state_coord
-        i2, j2 = succ_state_deterministic(i, j, Action(action), self.grid_size)
+        i2, j2 = succ_state(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
         self.state_idx = i2 * self.grid_size + j2
         features = self.S[self.state_idx]
