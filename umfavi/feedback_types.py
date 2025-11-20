@@ -1,5 +1,5 @@
-from enum import IntEnum
+from enum import StrEnum
 
-class FeedbackType(IntEnum):
-    Preference = 0
-    Demonstration = 1
+class FeedbackType(StrEnum):
+    Preference = "preference"
+    Demonstration = "demonstration"

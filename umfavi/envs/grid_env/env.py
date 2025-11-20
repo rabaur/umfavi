@@ -4,7 +4,7 @@ import numpy as np
 from umfavi.envs.grid_env.actions import Action
 from umfavi.envs.grid_env.state_features import state_feature_factory
 from umfavi.envs.grid_env.action_features import action_feature_factory
-from umfavi.envs.grid_env.rewards import reward_factory, succ_state
+from umfavi.envs.grid_env.rewards import reward_factory, succ_state, to_flat_idx
 
 def construct_grid_env(
     grid_size: int,
@@ -58,7 +58,7 @@ def construct_grid_env(
                         P[s, a, s_prime] += p_rand / (n_A - 1)
     
     # Create reward matrix
-    R = reward_factory(grid_size, reward_type)
+    R = reward_factory(grid_size, reward_type, gamma=kwargs["gamma"])
 
     # Create state-feature matrix (n_states, state_feature_dim).
     S = state_feature_factory(state_feature_type, grid_size, **kwargs)
@@ -133,11 +133,12 @@ class GridEnv(gym.Env):
     def step(self, action):
         # update (i,j) deterministically or with randomness
         i, j = self.state_coord
+        prev_state_idx = self.state_idx
         i2, j2 = succ_state(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
-        self.state_idx = i2 * self.grid_size + j2
+        self.state_idx = to_flat_idx(i2, j2, self.grid_size)
         features = self.S[self.state_idx]
-        reward = self.R[self.state_idx, action]
+        reward = self.R[prev_state_idx, action, self.state_idx]
         terminated = False
         truncated = False
         info = {}

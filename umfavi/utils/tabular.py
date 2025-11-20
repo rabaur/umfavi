@@ -21,12 +21,15 @@ def q_opt_iteration(
     """
     # Compute V(s) = max_a Q(s,a) for each state
     V = np.max(Q_old, axis=1)  # Shape: (n_states,)
+
+    # Expected reward: sum_s' P(s'|s,a) * R(s,a,s')
+    expected_reward = np.sum(T * R, axis=2)
     
     # Compute expected future value: sum_s' P(s'|s,a) * V(s')
     expected_future_value_vectorized = np.sum(T * V, axis=2)
     
     # Q(s,a) = R(s,a) + gamma * sum_s' P(s'|s,a) * V(s')
-    Q_new = R + gamma * expected_future_value_vectorized
+    Q_new = expected_reward + gamma * expected_future_value_vectorized
     
     return Q_new
 
@@ -42,7 +45,7 @@ def q_opt(
     
     Args:
         T: Transition matrix (n_states, n_actions, n_states)
-        R: Reward matrix (n_states, n_actions)
+        R: Reward matrix (n_states, n_actions, n_states)
         gamma: Discount factor
         max_iter: Maximum number of iterations (fixed)
         tol: Convergence tolerance (not used, kept for compatibility)
@@ -50,7 +53,8 @@ def q_opt(
     Returns:
         Optimal Q-values matrix (n_states, n_actions)
     """
-    n_states, n_actions = R.shape
+
+    n_states, n_actions, _ = R.shape
     Q = np.zeros((n_states, n_actions))
     
     for _ in range(max_iter):

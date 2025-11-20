@@ -8,7 +8,7 @@ from typing import Any
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.data.preference_dataset import PreferenceDataset
 from umfavi.data.demonstration_dataset import DemonstrationDataset
-from umfavi.metrics.epic import evaluate_epic_distance
+from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import ExpertPolicy
@@ -47,13 +47,14 @@ def dataset_factory(active_feedback_types, args, env, policies, device):
             env=env,
             policy=policies[FeedbackType.Demonstration],
             device=device,
-            rationality=args.expert_rationality,
+            rationality=args.demo_rationality,
             gamma=args.gamma,
             td_error_weight=args.td_error_weight,
         )
         datasets[FeedbackType.Demonstration] = demo_dataset
         dataloaders[FeedbackType.Demonstration] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
         print(f"Created demonstration dataset with {len(demo_dataset)} samples")
+    return datasets, dataloaders
 
 
 def get_batch(dloader_iters, dataloaders, fb_type):
@@ -69,12 +70,33 @@ def get_batch(dloader_iters, dataloaders, fb_type):
 def compute_eval_loss(val_dataloaders, active_feedback_types, multi_fb_model: MultiFeedbackTypeModel):
     assert not multi_fb_model.training, "Model is not in evaluation mode"
     dloader_iters = {fb_type: iter(val_dataloaders[fb_type]) for fb_type in active_feedback_types}
-    eval_loss_dict
+    eval_loss_dict = {}
     for fb_type in active_feedback_types:
         batch = get_batch(dloader_iters, val_dataloaders, fb_type)
-        loss
+        loss_dict = multi_fb_model(**batch)
 
-
+        # Log total loss metrics
+        for k, v in loss_dict.items():
+            if k not in eval_loss_dict:
+                eval_loss_dict[k] = (0, 0.0)
+            count, agg_val = eval_loss_dict[k]
+            eval_loss_dict[k] = (count + 1, agg_val + v)
+        
+        # Log feedback-specific metrics
+        for k, v in loss_dict.items():
+            key = f"{k}_{fb_type}"
+            if key not in eval_loss_dict:
+                eval_loss_dict[key] = (0, 0.0)
+            count, agg_val = eval_loss_dict[key]
+            eval_loss_dict[key] = (count + 1, agg_val + v)
+    
+    # Average loss metrics
+    final_dict = {}
+    for k, (count, agg_val) in eval_loss_dict.items():
+        if count > 0:
+            final_dict[f"eval/{k}"] = agg_val / count
+    return final_dict
+        
 
 def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: str):
     epoch_log_dict = dict(epoch_log_dict)
@@ -144,8 +166,8 @@ def main(args):
     policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
     
     # Create datasets and dataloaders
-    _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies)
-    _, eval_dataloaders = dataset_factory(active_feedback_types, args, env, policies)
+    _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
+    _, val_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
 
     # Create feature module and encoder
     obs_dim = env.observation_space["state_features"].shape[0]
@@ -280,8 +302,8 @@ def main(args):
                 if args.log_wandb:
                     wandb_log_dict = {f"batch/{key}": value for key, value in aggregated_loss_dict.items()}
                     wandb_log_dict["batch/total_loss"] = total_loss.item()
-                    wandb_log_dict["global_step"] = global_step
-                    wandb.log(wandb_log_dict, step=relative_step)
+                    wandb_log_dict["relative_step"] = relative_step
+                    wandb.log(wandb_log_dict, step=global_step)
 
         # -----------------------------------------------
         # Evaluation
@@ -293,36 +315,30 @@ def main(args):
             with torch.no_grad():
 
                 # Compute the mean estimated reward per state-action pair
-                R_est = np.empty((n_states, n_actions))
-                for a in range(n_actions):
-                    a_feats_tiled = torch.tile(action_feats[a], (n_states, 1))
-                    R_mean_a, _ = fb_model.encoder(state_feats_flat, a_feats_tiled, state_feats_flat)
-                    R_est[:, a] = to_numpy(R_mean_a).squeeze()
+                if args.reward_domain == "s":
+                    R_est_mean, _ = fb_model.encoder(state_feats_flat, None, None)
+                    R_est_mean = R_est_mean.squeeze()
+                    R_est = torch.broadcast_to(R_est_mean[:, None, None], (n_states, n_actions, n_states))
+                else:
+                    raise NotImplementedError()
 
                 # Compute epic distance
-                epic_dist = evaluate_epic_distance(
-                    R_true=env.R,
-                    R_est=R_est,
-                    gamma=args.gamma)
-                eval_metrics["epic_distance"] = epic_dist
+                epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
+                eval_metrics["eval/epic_distance"] = epic_dist
                 
                 # Compute expected regret
-                regret = evaluate_regret(R_est=R_est, R_true=env.R, P=env.P, gamma=args.gamma)
-                eval_metrics["regret"] = regret
+                regret = evaluate_regret(R_est=to_numpy(R_est), R_true=env.R, P=env.P, gamma=args.gamma)
+                eval_metrics["eval/regret"] = regret
+
+                # Compute evaluation losses
+                eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
 
             # Log to wandb
             if args.log_wandb:
-                wandb.log({
-                    "eval/epic_distance": epic_dist,
-                    "eval/expected_regret": regret,
-                    "epoch": epoch,
-                    "global_step": global_step,
-                }, step=relative_step)
-
-                epoch_log_dict_wandb = epoch_log_dict_to_wandb(epoch_log_dict)
-                wandb.log(epoch_log_dict_wandb, step=global_step)
+                eval_metrics |= {"epoch": epoch, "relative_step": relative_step}
+                wandb.log(eval_metrics, step=global_step)
         
-            # Evaluation
+            # Visualization
             if (epoch + 1) % args.vis_freq == 0:
                 with torch.no_grad():
                     fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type])
@@ -351,8 +367,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0, help="Global seed")
     
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=69, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
@@ -366,7 +382,7 @@ if __name__ == "__main__":
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=42)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")

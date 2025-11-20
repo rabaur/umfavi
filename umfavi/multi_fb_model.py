@@ -5,6 +5,7 @@ from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.priors import kl_divergence_std_normal
 from umfavi.encoder.reward_encoder import BaseRewardEncoder
 from umfavi.regularizer.td_error import td_error_regularizer
+from umfavi.feedback_types import FeedbackType
 
 class MultiFeedbackTypeModel(nn.Module):
 
@@ -42,12 +43,9 @@ class MultiFeedbackTypeModel(nn.Module):
         nll, metrics = result
 
         # Regularization
-        if kwargs["feedback_type"][0] != "demonstration":
-            regularization = td_error_regularizer(q_values, kwargs["actions"], kwargs["reward_mean"], kwargs["reward_log_var"], kwargs["gamma"])
-        else:
-            regularization = td_error_regularizer(q_values, kwargs["actions"], kwargs["reward_mean"], kwargs["reward_log_var"], kwargs["gamma"])
+        td_error = td_error_regularizer(q_values, kwargs["actions"], kwargs["reward_mean"], kwargs["reward_log_var"], kwargs["gamma"])
 
         # Create final output
-        output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": regularization}
+        output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": td_error}
         output.update(metrics)
         return output
