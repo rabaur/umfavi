@@ -26,7 +26,7 @@ def td_error_regularizer(
     q_next = torch.gather(q_values[..., 1:, :], dim=-1, index=acts_next.unsqueeze(-1)).squeeze(-1)  # (batch_size, num_steps - 1)
     
     # Compute TD-error (which should equal the reward)
-    td_error_selected = q_curr - gamma[..., None, None] * q_next  # (batch_size, num_steps - 1)
+    td_error_selected = q_curr - gamma[0].item() * q_next  # (batch_size, num_steps - 1)
 
     # Compute the log-likelihood of observing the TD-error under the approximate posterior reward distribution
     reward_mean_selected = reward_mean[..., :-1]  # (batch_size, num_steps - 1)

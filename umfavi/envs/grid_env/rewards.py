@@ -75,7 +75,7 @@ def reward_factory(grid_size: int, reward_type: str, gamma: float):
     elif reward_type == "center":
         R = reward_sparse(grid_size, goal_position=(grid_size // 2, grid_size // 2), goal_val=1.0)
     elif reward_type == "penalty":
-        R = reward_sparse(grid_size, goal_position=(grid_size - 1, grid_size - 1), goal_val=-1)
+        R = reward_sparse(grid_size, goal_position=(grid_size - 2, grid_size - 2), goal_val=-1)
     elif reward_type == "path":
         R = reward_path(grid_size, 0, -1, -1, 4)
     elif reward_type == "cliff":

@@ -76,7 +76,6 @@ def validate_kwargs(kwargs):
     assert "p_rand" in kwargs, "p_rand must be provided"
     assert kwargs["grid_size"] > 0, "grid_size must be positive"
     assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
-    assert kwargs["reward_type"] in ["sparse", "dense", "path", "cliff", "five_goals", "gaussian_goals"], "Invalid reward type"
     assert kwargs["state_feature_type"] in ["one_hot", "continuous_coordinate", "dct", "embedding"], "Invalid state feature type"
     assert kwargs["action_feature_type"] in ["one_hot", "embedding"], "Invalid action feature type"
 

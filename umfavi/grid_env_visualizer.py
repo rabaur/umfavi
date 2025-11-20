@@ -70,7 +70,7 @@ def visualize_rewards(
     """
     Visualizes the rewards for a DCT grid environment using VSUP 
     (Value-Suppressing Uncertainty Palette) to combine mean and uncertainty.
-    Also displays the canonicalized mean reward.
+    Also displays the canonicalized mean reward and Q-values per action.
     
     Returns:
         fig: matplotlib figure object that can be logged to wandb
@@ -79,14 +79,17 @@ def visualize_rewards(
     gt_rewards = np.reshape(env.R, (grid_size, grid_size, -1))
     gt_rewards = np.max(gt_rewards, axis=-1)
     
-    # Create figure with 3 columns: ground truth, state-action distribution, VSUP
+    # Create figure with 3 rows: 
+    # Row 0: ground truth, log occupancy
+    # Row 1: mean rewards, std rewards
+    # Row 2-3: Q-values for each action (5 actions in 2 rows)
     fig, axs = plt.subplots(
-        nrows=2,
-        ncols=2,
-        figsize=(8, 8)
+        nrows=4,
+        ncols=3,
+        figsize=(12, 14)
     )
     
-    # Set column titles
+    # Set titles for first two rows
     axs[0, 0].set_title("Ground Truth", fontsize=14)
     axs[0, 1].set_title("log(Occupancy)", fontsize=14)
     axs[1, 0].set_title(r"$\mu$", fontsize=14)
@@ -119,8 +122,38 @@ def visualize_rewards(
 
     # Plot std
     im4 = axs[1, 1].imshow(std_grid, vmin=vmin_std, vmax=vmax_std)
+    
+    # Get Q-values for all states
+    q_values = fb_model.Q_value_model(state_feats_flat)  # shape: (n_states, n_actions)
+    q_values_np = to_numpy(q_values)  # shape: (grid_size^2, 5)
+    
+    # Compute global vmin/vmax for Q-values to use same scale
+    vmin_q, vmax_q = np.min(q_values_np), np.max(q_values_np)
+    
+    # Plot Q-values for each action
+    action_list = [Action.RIGHT, Action.UP, Action.LEFT, Action.DOWN, Action.STAY]
+    q_images = []
+    
+    for idx, action in enumerate(action_list):
+        row = 2 + idx // 3  # rows 2 and 3
+        col = idx % 3        # columns 0, 1, 2
+        
+        # Get Q-values for this action and reshape to grid
+        q_action = q_values_np[:, action].reshape(grid_size, grid_size)
+        
+        # Plot with consistent colormap scale
+        im_q = axs[row, col].imshow(q_action, vmin=vmin_q, vmax=vmax_q)
+        axs[row, col].set_title(f"Q({ACTION_SYMBOLS[action]})", fontsize=14)
+        axs[row, col].set_xticks([])
+        axs[row, col].set_yticks([])
+        
+        q_images.append(im_q)
+    
+    # Hide unused subplots in first two rows
+    axs[0, 2].axis('off')
+    axs[1, 2].axis('off')
          
-    # Remove individual subplot titles and axis labels
+    # Remove axis labels for first two rows
     for row in range(2):
         for col in range(2):
             axs[row, col].set_xticks([])
@@ -131,6 +164,12 @@ def visualize_rewards(
     plt.colorbar(im2, ax=axs[0, 1], fraction=0.046, pad=0.04)
     plt.colorbar(im3, ax=axs[1, 0], fraction=0.046, pad=0.04)
     plt.colorbar(im4, ax=axs[1, 1], fraction=0.046, pad=0.04)
+    
+    # Add colorbars for Q-value plots
+    for idx, im_q in enumerate(q_images):
+        row = 2 + idx // 3
+        col = idx % 3
+        plt.colorbar(im_q, ax=axs[row, col], fraction=0.046, pad=0.04)
     
     plt.tight_layout()
     return fig

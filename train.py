@@ -266,14 +266,14 @@ def main(args):
                 loss_dict = fb_model(**batch)
                 
                 # Compute ELBO loss for this feedback type
-                fb_loss = elbo_loss(
+                elbo = elbo_loss(
                     loss_dict["negative_log_likelihood"], 
                     loss_dict["kl_divergence"], 
                     kl_weight=args.kl_weight
                 )
                 
                 # Add regularization
-                total_loss = fb_loss + args.td_error_weight * loss_dict["td_error"]
+                total_loss += elbo + args.td_error_weight * loss_dict["td_error"]
                 
                 # Aggregate loss dict for logging
                 for key, value in loss_dict.items():
@@ -337,22 +337,24 @@ def main(args):
             if args.log_wandb:
                 eval_metrics |= {"epoch": epoch, "relative_step": relative_step}
                 wandb.log(eval_metrics, step=global_step)
-        
-            # Visualization
-            if (epoch + 1) % args.vis_freq == 0:
-                with torch.no_grad():
-                    fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type])
-                    # Log to wandb
-                    if args.log_wandb:
-                        wandb.log({
-                            "visualizations/rewards": wandb.Image(fig),
-                            "epoch": epoch,
-                        }, step=global_step)
-                    
-                    # Close the figure to free memory
-                    plt.close(fig)
             
             # Set model back to training mode
+            fb_model.train()
+        
+        # Visualization 
+        if epoch % args.vis_freq == 0:
+            fb_model.eval()
+            with torch.no_grad():
+                fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type])
+                # Log to wandb
+                if args.log_wandb:
+                    wandb.log({
+                        "visualizations/rewards": wandb.Image(fig),
+                        "epoch": epoch,
+                    }, step=global_step)
+                
+                # Close the figure to free memory
+                plt.close(fig)
             fb_model.train()
     
     # Finish wandb run
@@ -381,7 +383,7 @@ if __name__ == "__main__":
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
-    parser.add_argument("--eval_every_n_epochs", type=int, default=1)
+    parser.add_argument("--eval_every_n_epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
