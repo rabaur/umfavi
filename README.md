@@ -22,6 +22,16 @@ If you want to install additional development tools (testing, linting, etc.):
 pip install -e ".[dev]"
 ```
 
+### Installing with Non-Tabular Environment Support
+
+For using expert policies with non-tabular environments (e.g., CartPole, Atari):
+
+```bash
+pip install -e ".[nontabular]"
+```
+
+This installs `stable-baselines3` for training and using DQN-based expert policies.
+
 ## Usage
 
 After installation, you can import the package in your Python code:
@@ -64,5 +74,46 @@ python train.py         # Run with default parameters
 - Gymnasium (or gym)
 - wandb
 
+### Optional Dependencies
+
+- `stable-baselines3>=2.0.0` - For non-tabular expert policies (install with `pip install -e ".[nontabular]"`)
+
 See `setup.py` for the complete list of dependencies.
+
+## Expert Policies
+
+The package supports expert policies for both **tabular** and **non-tabular** environments:
+
+### Tabular Environments (GridEnv)
+
+For environments with known transition dynamics, the package computes optimal Q-values analytically:
+
+```python
+from umfavi.envs.grid_env.env import GridEnv
+from umfavi.utils.policies import create_expert_policy
+
+env = GridEnv(grid_size=10, reward_type="sparse", ...)
+policy = create_expert_policy(env, rationality=5.0, gamma=0.9)
+```
+
+### Non-Tabular Environments (CartPole, etc.)
+
+For standard Gymnasium environments, the package can use DQN-based expert policies:
+
+```python
+import gymnasium as gym
+from umfavi.utils.policies import create_expert_policy
+
+env = gym.make("CartPole-v1")
+policy = create_expert_policy(
+    env, 
+    rationality=1.0, 
+    gamma=0.99,
+    train_if_missing=True  # Auto-train if no pretrained model exists
+)
+```
+
+The `create_expert_policy()` factory function automatically detects the environment type and creates the appropriate policy.
+
+See `POLICY_USAGE.md` for detailed documentation on expert policies.
 

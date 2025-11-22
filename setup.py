@@ -20,6 +20,9 @@ setup(
             "black",
             "flake8",
         ],
+        "nontabular": [
+            "stable-baselines3>=2.0.0",
+        ],
     },
     classifiers=[
         "Development Status :: 3 - Alpha",

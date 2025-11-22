@@ -5,15 +5,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from typing import Any
-from umfavi.envs.grid_env.env import GridEnv
+from umfavi.envs.get_env import get_env
 from umfavi.data.preference_dataset import PreferenceDataset
 from umfavi.data.demonstration_dataset import DemonstrationDataset
 from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import ExpertPolicy
+from umfavi.utils.policies import create_expert_policy
+from umfavi.utils.gym import get_obs_dim, get_act_dim
 from umfavi.encoder.reward_encoder import RewardEncoder
-from umfavi.encoder.features import MLPFeatureModule
+from umfavi.encoder.feature_modules import MLPFeatureModule
 from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.reproducibility import seed_everything
@@ -136,17 +137,14 @@ def main(args):
             tags=args.wandb_tags.split(",") if args.wandb_tags else None,
         )
 
-    env = GridEnv(
-        **vars(args),
-    )
+    env = get_env(**vars(args))
 
     device = get_device()
         
     # Get all state-action features for evaluation
-    n_states = env.S.shape[0]
-    n_actions = env.action_space.n
-    state_feats_flat = torch.tensor(env.S).to(device=device)
-    action_feats = torch.tensor(env.A).to(device=device)
+    # n_states = env.S.shape[0]
+    # n_actions = env.action_space.n
+    # state_feats_flat = torch.tensor(env.S).to(device=device)
 
     # Register feedback types and their sample counts
     feedback_config = {
@@ -162,16 +160,16 @@ def main(args):
     
     # Create policies
     policies = {}
-    policies[FeedbackType.Preference] = ExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
-    policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    policies[FeedbackType.Preference] = create_expert_policy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
+    policies[FeedbackType.Demonstration] = create_expert_policy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
     
     # Create datasets and dataloaders
     _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
     _, val_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
 
-    # Create feature module and encoder
-    obs_dim = env.observation_space["state_features"].shape[0]
-    act_dim = env.action_space.n
+    # Dimensionality of the observation and action-space
+    obs_dim = get_obs_dim(env)
+    act_dim = get_act_dim(env)
     learn_embedding = args.state_feature_type == "embedding"
 
     feature_module = MLPFeatureModule(
@@ -377,7 +375,7 @@ if __name__ == "__main__":
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
-    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality for the expert policy generating the comparison trajectories")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
     parser.add_argument("--demo_rationality", type=float, default=5.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
@@ -393,7 +391,7 @@ if __name__ == "__main__":
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--reward_type", type=str, default="sparse")
+    parser.add_argument("--env_name", type=str, default="CartPole-v1")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")

@@ -15,8 +15,8 @@ class MLPFeatureModule(nn.Module):
         learn_embedding: Optional[bool] = False,
         state_embedding_size: Optional[int] = None,
         action_embedding_size: Optional[int] = None,
-        n_states: Optional[int] = None,
-        n_actions: Optional[int] = None
+        num_states_discrete: Optional[int] = None,
+        num_actions_discrete: Optional[int] = None
     ):
         """
         Args:
@@ -32,10 +32,10 @@ class MLPFeatureModule(nn.Module):
         if learn_embedding:
             assert state_embedding_size, "`state_embedding_size` cannot be None if `learn_embedding` is True"
             assert action_embedding_size, "`action_embedding_size` cannot be None if `learn_embedding` is True"
-            assert n_states, "`n_states` cannot be None if `learn_embedding` is True"
-            assert n_actions, "`n_actions` cannot be None if `learn_embedding` is True"
-            self.state_embedding = nn.Embedding(n_states, state_embedding_size)
-            self.action_embedding = nn.Embedding(n_actions, action_embedding_size)
+            assert num_states_discrete, "`num_states_discrete` cannot be None if `learn_embedding` is True"
+            assert num_actions_discrete, "`num_actions_discrete` cannot be None if `learn_embedding` is True"
+            self.state_embedding = nn.Embedding(num_states_discrete, state_embedding_size)
+            self.action_embedding = nn.Embedding(num_actions_discrete, action_embedding_size)
         else:
             self.state_embedding = nn.Identity()
             self.action_embedding = nn.Identity()
