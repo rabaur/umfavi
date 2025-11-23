@@ -23,7 +23,7 @@ def _create_nan_like(value):
         # For other types, return np.nan as fallback
         return INVALID_FLOAT
 
-def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True) -> TrajectoryType:
+def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True, seed: int = None) -> TrajectoryType:
     """
     Rollout a policy in an environment for n_steps.
     
@@ -32,12 +32,16 @@ def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True) -> T
         policy: Policy function that maps observations to actions
         n_steps: Number of steps to rollout
         pad: If True, pad trajectory to n_steps with NaN values if episode ends early
+        seed: Optional seed for environment reset
     
     Returns:
         List of (obs, action, reward, next_obs, done, info) tuples
     """
     ep = []
-    obs, _ = env.reset()
+    if seed is not None:
+        obs, _ = env.reset(seed=seed)
+    else:
+        obs, _ = env.reset()
     done = False
     step = 0
     
@@ -93,7 +97,7 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
 def get_discounted_return(trajectory: TrajectoryType, gamma: float):
     rewards = np.array([r for _, _, r, _, _, _ in trajectory])
     T = len(rewards)
-    gammas = gamma * np.arange(T)
+    gammas = gamma ** np.arange(T)
     return np.nansum(rewards * gammas)
 
 

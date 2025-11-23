@@ -13,7 +13,13 @@ from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import ExpertPolicy, create_expert_policy
+from umfavi.utils.policies import (
+    ExpertPolicy, 
+    create_expert_policy,
+    load_or_train_dqn,
+    DQNQValueModel,
+    TabularQValueModel
+)
 from umfavi.utils.gym import get_obs_dim, get_act_dim
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.feature_modules import MLPFeatureModule
@@ -124,10 +130,26 @@ def main(args):
     if not active_feedback_types:
         raise ValueError("At least one feedback type must have samples > 0")
     
-    # Create policies
+    # Create Q-value model (shared across all policies)
+    is_tabular = hasattr(env, 'P') and hasattr(env, 'R')
+    if is_tabular:
+        q_model = TabularQValueModel(env, gamma=args.gamma)
+    else:
+        dqn_model = load_or_train_dqn(env, gamma=args.gamma, train_if_missing=True)
+        q_model = DQNQValueModel(dqn_model)
+    
+    # Create policies (all sharing the same Q-value model)
     policies = {}
-    policies[FeedbackType.PREFERENCE] = create_expert_policy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
-    policies[FeedbackType.DEMONSTRATION] = create_expert_policy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    policies[FeedbackType.PREFERENCE] = create_expert_policy(
+        env=env, 
+        rationality=args.pref_trajectory_rationality, 
+        q_model=q_model
+    )
+    policies[FeedbackType.DEMONSTRATION] = create_expert_policy(
+        env=env, 
+        rationality=args.demo_rationality, 
+        q_model=q_model
+    )
     
     # Define action-transform
     act_transform = None
@@ -207,7 +229,7 @@ def main(args):
     print(f"Starting training for {args.num_epochs} epochs")
     print(f"{'='*60}\n")
 
-    regret_reference_policy = create_expert_policy(env, rationality=float("inf"), gamma=args.gamma)
+    regret_reference_policy = create_expert_policy(env, rationality=float("inf"), q_model=q_model)
 
     for epoch in range(args.num_epochs):
         
@@ -290,21 +312,21 @@ def main(args):
             print(f"  Evaluating...")
             fb_model.eval()
             eval_metrics = {}
+
+            # Compute epic distance
+            # epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
+            # eval_metrics["eval/epic_distance"] = epic_dist
+            
+            # Compute expected regret
+            if args.env_name == "CartPole-v1":
+                wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
+                regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+            else:
+                regret = np.inf
+            eval_metrics["eval/regret"] = regret
+
+            # Compute evaluation losses
             with torch.no_grad():
-
-                # Compute epic distance
-                # epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
-                # eval_metrics["eval/epic_distance"] = epic_dist
-                
-                # Compute expected regret
-                if args.env_name == "CartPole-v1":
-                    wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                    regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
-                else:
-                    regret = np.inf
-                eval_metrics["eval/regret"] = regret
-
-                # Compute evaluation losses
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
 
 
@@ -418,7 +440,7 @@ if __name__ == "__main__":
     
     # Wandb parameters
     parser.add_argument("--log_wandb", action="store_true", help="Log to weights and biases")
-    parser.add_argument("--log_every_n_steps", type=int, default=1, help="Log every n steps")
+    parser.add_argument("--log_every_n_steps", type=int, default=10, help="Log every n steps")
     parser.add_argument("--wandb_project", type=str, default="var-rew-learning", help="Wandb project name")
     parser.add_argument("--wandb_tags", type=str, default="", help="Comma-separated wandb tags")
     parser.add_argument("--wandb_watch", action="store_true", help="Enable wandb model watching (logs gradients and parameters)")

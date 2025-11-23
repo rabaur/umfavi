@@ -3,7 +3,12 @@ import gymnasium as gym
 from numpy.typing import NDArray
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.utils.tabular import q_opt
-from umfavi.utils.policies import ExpertPolicy, create_expert_policy
+from umfavi.utils.policies import (
+    ExpertPolicy, 
+    create_expert_policy,
+    load_or_train_dqn,
+    DQNQValueModel
+)
 from umfavi.utils.gym import rollout, get_discounted_return
 
 
@@ -61,14 +66,26 @@ def evaluate_regret_non_tabular(
     num_samples: int = 100,
     max_num_steps: int = 100,
 ):
-    est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), gamma=gamma, force_train=True)
+    # Train a new DQN model on the wrapped environment with learned reward
+    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=10000)
+    q_model = DQNQValueModel(dqn_model)
+    est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
+    
     regret = 0
-    for _ in range(num_samples):
-        traj_expert = rollout(base_env, true_expert_policy, n_steps=max_num_steps)
-        traj_est = rollout(base_env, est_expert_policy, n_steps=max_num_steps)
+    for i in range(num_samples):
+        # Roll out both policies from the same initial state for fair comparison
+        seed = i  # Use iteration index as seed for reproducibility
+        
+        # Rollout true expert policy
+        traj_expert = rollout(base_env, true_expert_policy, n_steps=max_num_steps, seed=seed)
         ret_expert = get_discounted_return(traj_expert, gamma)
+        
+        # Rollout estimated expert policy from the same initial state
+        traj_est = rollout(base_env, est_expert_policy, n_steps=max_num_steps, seed=seed)
         ret_est = get_discounted_return(traj_est, gamma)
+        
         regret += ret_expert - ret_est
+    
     return regret / num_samples
 
 
