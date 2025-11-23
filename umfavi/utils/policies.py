@@ -237,10 +237,14 @@ class DQNExpertPolicy(ExpertPolicy):
         q_values = self._get_q_values(observation)
         
         # Apply softmax with rationality parameter
-        action_probs = softmax(self.rationality * q_values, dims=0)
+        if self.rationality != float('inf'):
+            action_probs = softmax(self.rationality * q_values, dims=0)
         
-        # Sample action from the distribution
-        action = np.random.choice(len(action_probs), p=action_probs)
+            # Sample action from the distribution
+            action = np.random.choice(len(action_probs), p=action_probs)
+        else:
+            # Deterministic policy
+            action = np.argmax(q_values)
         
         return action
 
