@@ -6,13 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any
 from torch.utils.data import DataLoader
+from umfavi import multi_fb_model
 from umfavi.envs.get_env import get_env
 from umfavi.data.get_dataset import get_dataset
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.metrics.epic import epic_distance
-from umfavi.metrics.regret import evaluate_regret
+from umfavi.metrics.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import create_expert_policy
+from umfavi.utils.policies import ExpertPolicy, create_expert_policy
 from umfavi.utils.gym import get_obs_dim, get_act_dim
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.feature_modules import MLPFeatureModule
@@ -129,9 +130,9 @@ def main(args):
     policies[FeedbackType.DEMONSTRATION] = create_expert_policy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
     
     # Define action-transform
-    action_transform = None
+    act_transform = None
     if args.action_feature_type == "one_hot":
-        action_transform = lambda x: to_one_hot(x, env.action_space.n)
+        act_transform = lambda x: to_one_hot(x, env.action_space.n)
     else:
         raise NotImplementedError(f"Invalid action feature type: {args.action_feature_type}")
     obs_transform = None
@@ -139,11 +140,11 @@ def main(args):
 
     # Dimensionality of the observation and action-space
     obs_dim = get_obs_dim(env, obs_transform)
-    act_dim = get_act_dim(env, action_transform)
+    act_dim = get_act_dim(env, act_transform)
 
     # Create datasets and dataloaders
-    _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, action_transform)
-    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, action_transform)
+    _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
+    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
 
 
     feature_module = MLPFeatureModule(
@@ -181,27 +182,6 @@ def main(args):
         decoders=decoders
     )
     fb_model.to(device)
-
-    wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, action_transform, obs_transform)
-
-    dqn_model = sb3.DQN(
-        "MlpPolicy",
-        wrapped_env,
-        gamma=args.gamma,
-        learning_rate=1e-3,
-        buffer_size=50000,
-        learning_starts=1000,
-        batch_size=32,
-        tau=1.0,
-        target_update_interval=500,
-        train_freq=4,
-        gradient_steps=1,
-        exploration_fraction=0.1,
-        exploration_final_eps=0.05,
-        verbose=1
-    )
-
-    dqn_model.learn(total_timesteps=100_000)
     
     # Watch model with wandb (log gradients and parameters)
     if args.log_wandb:
@@ -226,6 +206,8 @@ def main(args):
     print(f"\n{'='*60}")
     print(f"Starting training for {args.num_epochs} epochs")
     print(f"{'='*60}\n")
+
+    regret_reference_policy = create_expert_policy(env, rationality=float("inf"), gamma=args.gamma)
 
     for epoch in range(args.num_epochs):
         
@@ -303,31 +285,28 @@ def main(args):
         # -----------------------------------------------
         # Evaluation
         # -----------------------------------------------
-        if False and epoch % args.eval_every_n_epochs == 0:
+        if epoch % args.eval_every_n_epochs == 0:
             
             print(f"  Evaluating...")
             fb_model.eval()
             eval_metrics = {}
             with torch.no_grad():
 
-                # Compute the mean estimated reward per state-action pair
-                if args.reward_domain == "s":
-                    R_est_mean, _ = fb_model.encoder(state_feats_flat, None, None)
-                    R_est_mean = R_est_mean.squeeze()
-                    R_est = torch.broadcast_to(R_est_mean[:, None, None], (n_states, n_actions, n_states))
-                else:
-                    raise NotImplementedError()
-
                 # Compute epic distance
-                epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
-                eval_metrics["eval/epic_distance"] = epic_dist
+                # epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
+                # eval_metrics["eval/epic_distance"] = epic_dist
                 
                 # Compute expected regret
-                regret = evaluate_regret(R_est=to_numpy(R_est), R_true=env.R, P=env.P, gamma=args.gamma)
+                if args.env_name == "CartPole-v1":
+                    wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
+                    regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+                else:
+                    regret = np.inf
                 eval_metrics["eval/regret"] = regret
 
                 # Compute evaluation losses
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
+
 
             # Console logging of evaluation metrics
             print(f"  Evaluation Results:")

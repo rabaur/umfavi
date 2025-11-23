@@ -90,6 +90,13 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     return traj_dict
 
 
+def get_discounted_return(trajectory: TrajectoryType, gamma: float):
+    rewards = np.array([r for _, _, r, _, _, _ in trajectory])
+    T = len(rewards)
+    gammas = gamma * np.arange(T)
+    return np.nansum(rewards * gammas)
+
+
 def is_registered_gym_env(env_name: str) -> bool:
     """
     Check if a Gym environment is registered.

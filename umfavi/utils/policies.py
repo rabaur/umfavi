@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 from umfavi.utils.tabular import q_opt
 from umfavi.utils.math import softmax
-from umfavi.envs.grid_env.env import GridEnv
+import stable_baselines3 as sb3
 
 
 class UniformPolicy:
@@ -124,6 +124,7 @@ class DQNExpertPolicy(ExpertPolicy):
         env: gym.Env, 
         rationality: float = 1.0, 
         gamma: float = 0.99,
+        force_train: bool = False,
         model_path: str = None,
         train_if_missing: bool = True,
         training_timesteps: int = 100000
@@ -144,18 +145,8 @@ class DQNExpertPolicy(ExpertPolicy):
         self.model_path = model_path
         self.training_timesteps = training_timesteps
         
-        # Check for stable-baselines3
-        try:
-            from stable_baselines3 import DQN
-            self.DQN = DQN
-        except ImportError:
-            raise ImportError(
-                "stable-baselines3 is required for DQNExpertPolicy. "
-                "Install with: pip install stable-baselines3"
-            )
-        
         # Determine model path
-        if self.model_path is None:
+        if self.model_path is None and not force_train:
             env_name = env.spec.id if hasattr(env, 'spec') and env.spec else 'unknown'
             models_dir = Path("models")
             models_dir.mkdir(exist_ok=True)
@@ -164,7 +155,7 @@ class DQNExpertPolicy(ExpertPolicy):
         # Load or train model
         if os.path.exists(self.model_path):
             print(f"Loading pretrained DQN model from {self.model_path}")
-            self.dqn_model = self.DQN.load(self.model_path, env=self.env)
+            self.dqn_model = sb3.DQN.load(self.model_path, env=self.env)
         elif train_if_missing:
             print(f"No pretrained model found at {self.model_path}")
             self._train_dqn_model()
@@ -177,7 +168,7 @@ class DQNExpertPolicy(ExpertPolicy):
         """Train a DQN model for the environment."""
         print(f"Training DQN for {self.training_timesteps} timesteps...")
         
-        self.dqn_model = self.DQN(
+        self.dqn_model = sb3.DQN(
             "MlpPolicy",
             self.env,
             gamma=self.gamma,
