@@ -10,6 +10,9 @@ class BaseRewardEncoder(nn.Module, ABC):
     @abstractmethod
     def sample(self, mean: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         ...
+    @abstractmethod
+    def predict_and_sample(self, state_features: torch.Tensor, action_features: torch.Tensor, next_state_features: torch.Tensor) -> torch.Tensor:
+        ...
 
 class RewardEncoder(BaseRewardEncoder):
     """Variational, amortized approximation of the reward posterior."""
@@ -30,3 +33,8 @@ class RewardEncoder(BaseRewardEncoder):
         std = log_var_to_std(logvar)
         eps = torch.randn_like(std)
         return mean + std * eps
+    
+    def predict_and_sample(self, state_features: torch.Tensor, action_features: torch.Tensor, next_state_features: torch.Tensor) -> torch.Tensor:
+        mean, logvar = self.forward(state_features, action_features, next_state_features)
+        with torch.no_grad():
+            return self.sample(mean, logvar)

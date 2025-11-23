@@ -3,7 +3,7 @@ from typing import Callable
 
 
 def to_one_hot(discr_x: int, n: int) -> np.ndarray:
-    one_hot = np.zeros(n)
+    one_hot = np.zeros(n, dtype=np.float32)
     one_hot[discr_x] = 1
     return one_hot
 

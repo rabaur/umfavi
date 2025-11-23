@@ -1,4 +1,5 @@
 import argparse
+import stable_baselines3 as sb3
 import torch
 import wandb
 import numpy as np
@@ -7,6 +8,7 @@ from typing import Any
 from torch.utils.data import DataLoader
 from umfavi.envs.get_env import get_env
 from umfavi.data.get_dataset import get_dataset
+from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
@@ -179,6 +181,27 @@ def main(args):
         decoders=decoders
     )
     fb_model.to(device)
+
+    wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, action_transform, obs_transform)
+
+    dqn_model = sb3.DQN(
+        "MlpPolicy",
+        wrapped_env,
+        gamma=args.gamma,
+        learning_rate=1e-3,
+        buffer_size=50000,
+        learning_starts=1000,
+        batch_size=32,
+        tau=1.0,
+        target_update_interval=500,
+        train_freq=4,
+        gradient_steps=1,
+        exploration_fraction=0.1,
+        exploration_final_eps=0.05,
+        verbose=1
+    )
+
+    dqn_model.learn(total_timesteps=100_000)
     
     # Watch model with wandb (log gradients and parameters)
     if args.log_wandb:
