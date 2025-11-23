@@ -12,11 +12,6 @@ class MLPFeatureModule(nn.Module):
         hidden_sizes: list[int],
         reward_domain: str = 's',
         activate_last_layer: bool = True,
-        learn_embedding: Optional[bool] = False,
-        state_embedding_size: Optional[int] = None,
-        action_embedding_size: Optional[int] = None,
-        num_states_discrete: Optional[int] = None,
-        num_actions_discrete: Optional[int] = None
     ):
         """
         Args:
@@ -26,25 +21,7 @@ class MLPFeatureModule(nn.Module):
         """
         super().__init__()
         
-        self.learn_embedding = learn_embedding
         self.reward_domain = reward_domain
-
-        if learn_embedding:
-            assert state_embedding_size, "`state_embedding_size` cannot be None if `learn_embedding` is True"
-            assert action_embedding_size, "`action_embedding_size` cannot be None if `learn_embedding` is True"
-            assert num_states_discrete, "`num_states_discrete` cannot be None if `learn_embedding` is True"
-            assert num_actions_discrete, "`num_actions_discrete` cannot be None if `learn_embedding` is True"
-            self.state_embedding = nn.Embedding(num_states_discrete, state_embedding_size)
-            self.action_embedding = nn.Embedding(num_actions_discrete, action_embedding_size)
-        else:
-            self.state_embedding = nn.Identity()
-            self.action_embedding = nn.Identity()
-        
-        # If we learn the state embedding, the state feature dimensional is the state_embedding
-        # Analogously for action embedding
-        if learn_embedding:
-            state_dim = state_embedding_size
-            action_dim = action_embedding_size
 
         if reward_domain == 's':
             input_dim = state_dim
@@ -69,18 +46,13 @@ class MLPFeatureModule(nn.Module):
         actions: Optional[torch.Tensor] = None,
         next_states: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        state_feats = self.state_embedding(states)
-        
         if self.reward_domain == 's':
-            feats = state_feats
+            input = states
         elif self.reward_domain == 'sa':
-            action_feats = self.action_embedding(actions)
-            feats = torch.cat([state_feats, action_feats], dim=-1)
+            input = torch.cat([states, actions], dim=-1)
         elif self.reward_domain == 'sas':
-            action_feats = self.action_embedding(actions)
-            next_state_feats = self.state_embedding(next_states)
-            feats = torch.cat([state_feats, action_feats, next_state_feats], dim=-1)
+            input = torch.cat([states, actions, next_states], dim=-1)
         else:
             raise Exception(f"Unsupported reward domain '{self.reward_domain}'")
         
-        return self.mlp(feats)
+        return self.mlp(input)

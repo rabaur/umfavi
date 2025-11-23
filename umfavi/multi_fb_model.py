@@ -5,7 +5,8 @@ from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.priors import kl_divergence_std_normal
 from umfavi.encoder.reward_encoder import BaseRewardEncoder
 from umfavi.regularizer.td_error import td_error_regularizer
-from umfavi.feedback_types import FeedbackType
+from umfavi.types import FeedbackType
+from umfavi.types import SampleKey
 
 class MultiFeedbackTypeModel(nn.Module):
 
@@ -18,15 +19,23 @@ class MultiFeedbackTypeModel(nn.Module):
     def forward(self, **kwargs) -> Any:
 
         # Encode
-        state_feats = kwargs["state_features"]
-        action_feats = kwargs["action_features"]
-        next_state_feats = kwargs["next_state_features"]
-        mean, log_var = self.encoder(state_feats, action_feats, next_state_feats)
+        obs = kwargs[SampleKey.OBS]
+        action_feats = kwargs[SampleKey.ACT_FEATS]
+        next_obs = kwargs[SampleKey.NEXT_OBS]
+        dones = kwargs[SampleKey.DONES]
+        
+        # Replace NaN values with zeros before encoding to prevent NaN propagation
+        # These timesteps will be masked out in loss computation using the dones mask
+        obs = torch.nan_to_num(obs, nan=0.0)
+        action_feats = torch.nan_to_num(action_feats, nan=0.0)
+        next_obs = torch.nan_to_num(next_obs, nan=0.0)
+        
+        mean, log_var = self.encoder(obs, action_feats, next_obs)
         reward_samples = self.encoder.sample(mean, log_var)
-        kl_div = kl_divergence_std_normal(mean, log_var)
+        kl_div = kl_divergence_std_normal(mean, log_var, dones)
 
         # Route to appropriate head with all kwargs
-        head = self.decoders[kwargs["feedback_type"][0]]  # we can assume that all feedback types are the same per batch
+        head = self.decoders[kwargs[SampleKey.FEEDBACK_TYPE][0]]  # we can assume that all feedback types are the same per batch
         
         # Add reward mean and log_var to kwargs for decoders that need them
         kwargs["reward_mean"] = mean.squeeze(-1)
@@ -34,16 +43,23 @@ class MultiFeedbackTypeModel(nn.Module):
 
         # Compute Q-value estimates. Get gradients for q-value model only for demonstration feedback type.
         # Otherwise, it is not well defined.
-        q_values = self.Q_value_model(state_feats)
+        q_values = self.Q_value_model(obs)
         kwargs["q_values"] = q_values
         
-        result = head(reward_samples.squeeze(-1), **kwargs)
+        result = head(reward_samples, **kwargs)
         
         # Handle decoders that return (loss, metrics) or just loss
         nll, metrics = result
 
         # Regularization
-        td_error = td_error_regularizer(q_values, kwargs["actions"], kwargs["reward_mean"], kwargs["reward_log_var"], kwargs["gamma"])
+        td_error = td_error_regularizer(
+            q_values, 
+            kwargs[SampleKey.ACTS], 
+            kwargs["reward_mean"], 
+            kwargs["reward_log_var"], 
+            kwargs[SampleKey.GAMMA],
+            kwargs[SampleKey.DONES]
+        )
 
         # Create final output
         output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": td_error}
