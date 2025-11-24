@@ -5,11 +5,10 @@ from umfavi.envs.grid_env.actions import Action
 from umfavi.envs.grid_env.state_features import state_feature_factory
 from umfavi.envs.grid_env.action_features import action_feature_factory
 from umfavi.envs.grid_env.rewards import reward_factory, succ_state, to_flat_idx
+from umfavi.envs.env_types import TabularEnv
 
 def construct_grid_env(
     grid_size: int,
-    state_feature_type: str,
-    action_feature_type: str,
     reward_type: str,
     p_rand: float,
     **kwargs,
@@ -60,13 +59,7 @@ def construct_grid_env(
     # Create reward matrix
     R = reward_factory(grid_size, reward_type, gamma=kwargs["gamma"])
 
-    # Create state-feature matrix (n_states, state_feature_dim).
-    S = state_feature_factory(state_feature_type, grid_size, **kwargs)
-
-    # Create action-feature matrix (n_actions, action_feature_dim)
-    A = action_feature_factory(action_feature_type, n_actions=n_A)
-
-    return P, R, S, A
+    return P, R
 
 def validate_kwargs(kwargs):
     assert "grid_size" in kwargs, "grid_size must be provided"
@@ -79,7 +72,7 @@ def validate_kwargs(kwargs):
     assert kwargs["state_feature_type"] in ["one_hot", "continuous_coordinate", "dct", "embedding"], "Invalid state feature type"
     assert kwargs["action_feature_type"] in ["one_hot", "embedding"], "Invalid action feature type"
 
-class GridEnv(gym.Env):
+class GridEnv(TabularEnv):
     metadata = {"render_modes": ["human"]}
 
     def __init__(self, **kwargs):
@@ -101,16 +94,14 @@ class GridEnv(gym.Env):
         self.state_feature_type = kwargs["state_feature_type"]
         self.action_feature_type = kwargs["action_feature_type"]
         # Compute S (features) etc. using existing code
-        self.P, self.R, self.S, self.A = construct_grid_env(**kwargs)
+        self._P, self._R = construct_grid_env(**kwargs)
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 
         # Observation space
-        try:
-            state_feature_shape = self.S.shape[1]
-        except IndexError:
-            state_feature_shape = self.S.shape[0]
-        self.observation_space = spaces.Dict({spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(state_feature_shape,))})
+        self.observation_space = spaces.Discrete(self.grid_size ** 2)
+
+        # Internal state representation
         self.state_coord = None  # will hold (i,j)
         self.state_idx = None
 
@@ -120,9 +111,7 @@ class GridEnv(gym.Env):
         j = 0
         self.state_coord = (i, j)
         self.state_idx = i * self.grid_size + j
-        obs = self.S[self.state_idx]
-        info = {"state_idx": self.state_idx}
-        return obs, info
+        return self.state_idx, {}
 
     def step(self, action):
         # update (i,j) deterministically or with randomness
@@ -131,15 +120,19 @@ class GridEnv(gym.Env):
         i2, j2 = succ_state(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
         self.state_idx = to_flat_idx(i2, j2, self.grid_size)
-        obs = self.S[self.state_idx]
-        reward = self.R[prev_state_idx, action, self.state_idx]
+        reward = self._R[prev_state_idx, action, self.state_idx]
         terminated = False
         truncated = False
-        info = {"state_idx": self.state_idx}
-        return obs, reward, terminated, truncated, info
+        return self.state_idx, reward, terminated, truncated, {}
 
     def render(self, mode="human"):
         pass  # implement optional
 
     def close(self):
         pass
+    
+    def get_transition_matrix(self):
+        return self._P
+    
+    def get_reward_matrix(self):
+        return self._R

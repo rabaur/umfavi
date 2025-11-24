@@ -32,12 +32,12 @@ def value_under_policy(P, R_true, gamma, pi):
 
 
 def evaluate_regret_tabular(
-    R_true: NDArray,
+    env: TabularEnv,
     R_est: NDArray,
-    P: NDArray,
     gamma: float,
     max_iter: int = 1000,
-    tol: float = 1e-6
+    tol: float = 1e-6,
+    num_samples: int = 1000
 ) -> float:
     """
     Computes expected regret over states.
@@ -63,7 +63,7 @@ def evaluate_regret_non_tabular(
     base_env: gym.Env,
     wrapped_env: LearnedRewardWrapper,
     gamma: float,
-    num_samples: int = 100,
+    num_samples: int = 1000,
     max_num_steps: int = 100,
 ):
     # Train a new DQN model on the wrapped environment with learned reward
@@ -87,7 +87,6 @@ def evaluate_regret_non_tabular(
         regret += ret_expert - ret_est
     
     return regret / num_samples
-
 
     
 

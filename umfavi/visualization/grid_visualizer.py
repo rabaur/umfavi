@@ -76,7 +76,7 @@ def visualize_rewards(
         fig: matplotlib figure object that can be logged to wandb
     """
     grid_size = env.grid_size
-    gt_rewards = np.reshape(env.R, (grid_size, grid_size, -1))
+    gt_rewards = np.reshape(env._R, (grid_size, grid_size, -1))
     gt_rewards = np.max(gt_rewards, axis=-1)
     
     # Create figure with 3 rows: 
@@ -96,7 +96,7 @@ def visualize_rewards(
     axs[1, 1].set_title(r"$\sigma$", fontsize=14)
     
     # Get reward mean and logvar for each state-action combination
-    state_feats_flat = torch.tensor(env.S).to(device=device)
+    state_feats_flat = torch.tensor(env._S).to(device=device)
 
     # Predict mean and logvar
     mean, log_var = fb_model.encoder(state_feats_flat, None, None)

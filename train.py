@@ -1,4 +1,5 @@
 import argparse
+from socket import if_indextoname
 import stable_baselines3 as sb3
 import torch
 import wandb
@@ -14,7 +15,6 @@ from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import (
-    ExpertPolicy, 
     create_expert_policy,
     load_or_train_dqn,
     DQNQValueModel,
@@ -23,10 +23,10 @@ from umfavi.utils.policies import (
 from umfavi.utils.gym import get_obs_dim, get_act_dim
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.feature_modules import MLPFeatureModule
-from umfavi.loglikelihoods.preference import PreferenceDecoder
-from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
+from umfavi.loglikelihoods.get_nll import get_nll
 from umfavi.utils.reproducibility import seed_everything
-from umfavi.utils.torch import get_device, to_numpy
+from umfavi.utils.torch import get_device
+from umfavi.utils.logging import update_epoch_log_dict, console_log_batch_metrics, console_log_eval_metrics
 from umfavi.losses import elbo_loss
 from umfavi.visualization.grid_visualizer import visualize_rewards as visualize_grid_rewards
 from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
@@ -74,31 +74,6 @@ def compute_eval_loss(val_dataloaders: dict[FeedbackType, DataLoader], active_fe
         if count > 0:
             final_dict[f"eval/{k}"] = agg_val / count
     return final_dict
-        
-
-def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: FeedbackType):
-    epoch_log_dict = dict(epoch_log_dict)
-    for key, value in metrics_dict.items():
-        if key in epoch_log_dict:
-            prev_count, prev_val = epoch_log_dict[key]
-            updated_vals = (prev_count + 1, prev_val + value)
-            epoch_log_dict[key] = updated_vals
-            epoch_log_dict[f"{key}_{fb_type.value}"] = updated_vals
-        else:
-            initial_value = (1, value)
-            epoch_log_dict[key] = initial_value
-            epoch_log_dict[f"{key}_{fb_type.value}"] = initial_value
-    return epoch_log_dict
-
-
-def epoch_log_dict_to_wandb(epoch_log_dict: dict[str, tuple[int, Any]]):
-    wandb_dict = {}
-    for key, (count, agg_value) in epoch_log_dict.items():
-        if count > 0:
-            wandb_dict[f"epoch/{key}"] = agg_value / count
-        else:
-            wandb_dict[f"epoch/{key}"] = np.nan
-    return wandb_dict
 
 
 def main(args):
@@ -188,14 +163,7 @@ def main(args):
         activate_last_layer=False  # Q-values are in R
     )
     
-    if FeedbackType.PREFERENCE in active_feedback_types:
-        preference_decoder = PreferenceDecoder()
-        decoders[FeedbackType.PREFERENCE] = preference_decoder
-    
-    if FeedbackType.DEMONSTRATION in active_feedback_types:
-        # Q-value model is just MLPFeatureModule with reward_domain='s' and last layer = n_actions
-        demonstration_decoder = DemonstrationsDecoder()
-        decoders[FeedbackType.DEMONSTRATION] = demonstration_decoder
+    decoders = {fb_type: get_nll(fb_type) for fb_type in active_feedback_types}
     
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
@@ -275,7 +243,7 @@ def main(args):
                     aggregated_loss_dict[key] += value.item() if torch.is_tensor(value) else value
                     
                     # Also track per-feedback-type metrics
-                    fb_key = f"{key}_{fb_type}"
+                    fb_key = f"{key}_{fb_type.value}"
                     if fb_key not in aggregated_loss_dict:
                         aggregated_loss_dict[fb_key] = 0.0
                     aggregated_loss_dict[fb_key] += value.item() if torch.is_tensor(value) else value
@@ -293,10 +261,7 @@ def main(args):
             # Log to wandb and console every N steps
             if (global_step) % args.log_every_n_steps == 0:
                 # Console logging
-                nll = aggregated_loss_dict.get("negative_log_likelihood", 0.0)
-                kl = aggregated_loss_dict.get("kl_divergence", 0.0)
-                td = aggregated_loss_dict.get("td_error", 0.0)
-                print(f"  Step {step}/{steps_per_epoch-1} | Loss: {total_loss.item():.4f} | NLL: {nll:.4f} | KL: {kl:.4f} | TD: {td:.4f}")
+                console_log_batch_metrics(aggregated_loss_dict, step, steps_per_epoch, total_loss)
                 
                 if args.log_wandb:
                     wandb_log_dict = {f"batch/{key}": value for key, value in aggregated_loss_dict.items()}
@@ -318,36 +283,24 @@ def main(args):
             # eval_metrics["eval/epic_distance"] = epic_dist
             
             # Compute expected regret
-            if args.env_name == "CartPole-v1":
+            if is_tabular:
+                regret = evaluate_regret_tabular(env._R, to_numpy(R_est), gamma=args.gamma)
+            else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
                 regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
-            else:
-                regret = np.inf
             eval_metrics["eval/regret"] = regret
 
             # Compute evaluation losses
             with torch.no_grad():
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
 
-
-            # Console logging of evaluation metrics
-            print(f"  Evaluation Results:")
-            if "eval/epic_distance" in eval_metrics:
-                print(f"    EPIC Distance: {eval_metrics['eval/epic_distance']:.6f}")
-            if "eval/regret" in eval_metrics:
-                print(f"    Regret: {eval_metrics['eval/regret']:.6f}")
-            if "eval/negative_log_likelihood" in eval_metrics:
-                print(f"    Eval NLL: {eval_metrics['eval/negative_log_likelihood']:.4f}")
-            if "eval/kl_divergence" in eval_metrics:
-                print(f"    Eval KL: {eval_metrics['eval/kl_divergence']:.4f}")
-            if "eval/td_error" in eval_metrics:
-                print(f"    Eval TD Error: {eval_metrics['eval/td_error']:.4f}")
-            print()
-
             # Log to wandb
             if args.log_wandb:
                 eval_metrics |= {"epoch": epoch, "relative_step": relative_step}
                 wandb.log(eval_metrics, step=global_step)
+
+            # Console logging
+            console_log_eval_metrics(eval_metrics)
             
             # Set model back to training mode
             fb_model.train()
