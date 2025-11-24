@@ -259,7 +259,12 @@ class TabularExpertPolicy(ExpertPolicy):
         super().__init__(q_model, rationality)
         
         # Precompute full policy for efficiency in tabular case
-        self.policy = softmax(self.rationality * self.q_model.Q_optimal, dims=1)
+        if self.rationality == float('inf'):
+            # Put all probability mass on the action with the highest Q-value
+            self.policy = np.zeros(self.q_model.Q_optimal.shape)
+            self.policy[:, np.argmax(self.q_model.Q_optimal, axis=1)] = 1
+        else:
+            self.policy = softmax(self.rationality * self.q_model.Q_optimal, dims=1)
         self.env = self.q_model.env
     
     def __call__(self, observation):

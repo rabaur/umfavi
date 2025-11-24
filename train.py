@@ -85,17 +85,19 @@ def main(args):
     
     # Define action-transform
     act_transform = None
-    if args.act_transform == "one_hot":
-        act_transform = lambda x: to_one_hot(x, env.action_space.n)
-    else:
-        raise NotImplementedError(f"Invalid action transform: {args.act_transform}")
+    if args.act_transform:
+        if args.act_transform == "one_hot":
+            act_transform = lambda x: to_one_hot(x, env.action_space.n)
+        else:
+            raise NotImplementedError(f"Invalid action transform: {args.act_transform}")
     
     # Define observation-transform
     obs_transform = None
-    if args.obs_transform == "one_hot":
-        obs_transform = lambda x: to_one_hot(x, env.observation_space.n)
-    else:
-        raise NotImplementedError(f"Invalid observation transform: {args.obs_transform}")
+    if args.obs_transform:
+        if args.obs_transform == "one_hot":
+            obs_transform = lambda x: to_one_hot(x, env.observation_space.n)
+        else:
+            raise NotImplementedError(f"Invalid observation transform: {args.obs_transform}")
 
     # Dimensionality of the observation and action-space
     obs_dim = get_obs_dim(env, obs_transform)
@@ -253,7 +255,7 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100)
+                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=1000)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
                 regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
@@ -275,7 +277,7 @@ def main(args):
             fb_model.train()
         
         # Visualization 
-        if epoch % args.vis_freq == 0:
+        if epoch % args.vis_every_n_epochs == 0:
             print(f"  Generating visualization...")
             fb_model.eval()
             with torch.no_grad():
@@ -345,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
-    parser.add_argument("--vis_freq", type=int, default=10, help="Frequency of visualizations (epochs)")
+    parser.add_argument("--vis_every_n_epochs", type=int, default=25, help="Frequency of visualizations (epochs)")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
     
@@ -353,13 +355,10 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=10)
     parser.add_argument("--env_name", type=str, default="grid_sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", "none"], default="one_hot", help="Apply a transform to the observation space")
-    parser.add_argument("--act_transform", choices=["one_hot", "none"], default="one_hot", help="Apply a transform to the action space")
+    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
+    parser.add_argument("--act_transform", choices=["one_hot", None], default=None, help="Apply a transform to the action space")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions (only for grid environment)")
-    
-    # Visualization parameters
-    parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")
-    
+        
     # Wandb parameters
     parser.add_argument("--log_wandb", action="store_true", help="Log to weights and biases")
     parser.add_argument("--log_every_n_steps", type=int, default=10, help="Log every n steps")

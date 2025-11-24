@@ -20,7 +20,8 @@ def sigmoid(x: float) -> float:
 
 
 def softmax(X: NDArray, dims=tuple[int]) -> NDArray:
-    X -= np.max(X)
+    with np.errstate(all='raise'):
+        X -= np.max(X)
     return np.exp(X) / np.sum(np.exp(X), axis=dims, keepdims=True)
 
 
