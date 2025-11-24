@@ -1,18 +1,13 @@
 import argparse
-from socket import if_indextoname
-import stable_baselines3 as sb3
 import torch
 import wandb
-import numpy as np
 import matplotlib.pyplot as plt
-from typing import Any
-from torch.utils.data import DataLoader
-from umfavi import multi_fb_model
 from umfavi.envs.get_env import get_env
 from umfavi.data.get_dataset import get_dataset
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
-from umfavi.metrics.epic import epic_distance
-from umfavi.metrics.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
+from umfavi.evaluation.epic import epic_distance
+from umfavi.evaluation.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
+from umfavi.evaluation.val_loss import compute_eval_loss
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import (
     create_expert_policy,
@@ -33,48 +28,8 @@ from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.utils.feature_transforms import to_one_hot
 from umfavi.types import FeedbackType
-
-
-def get_batch(dloader_iters, dataloaders, fb_type):
-    try:
-        batch = next(dloader_iters[fb_type])
-    except StopIteration:
-        # Restart iterator if we've exhausted this dataloader
-        dloader_iters[fb_type] = iter(dataloaders[fb_type])
-        batch = next(dloader_iters[fb_type])
-    return batch
-
-
-def compute_eval_loss(val_dataloaders: dict[FeedbackType, DataLoader], active_feedback_types: list[FeedbackType], multi_fb_model: MultiFeedbackTypeModel):
-    assert not multi_fb_model.training, "Model is not in evaluation mode"
-    dloader_iters = {fb_type: iter(val_dataloaders[fb_type]) for fb_type in active_feedback_types}
-    eval_loss_dict = {}
-    for fb_type in active_feedback_types:
-        batch = get_batch(dloader_iters, val_dataloaders, fb_type)
-        loss_dict = multi_fb_model(**batch)
-
-        # Log total loss metrics
-        for k, v in loss_dict.items():
-            if k not in eval_loss_dict:
-                eval_loss_dict[k] = (0, 0.0)
-            count, agg_val = eval_loss_dict[k]
-            eval_loss_dict[k] = (count + 1, agg_val + v)
-        
-        # Log feedback-specific metrics
-        for k, v in loss_dict.items():
-            key = f"{k}_{fb_type.value}"
-            if key not in eval_loss_dict:
-                eval_loss_dict[key] = (0, 0.0)
-            count, agg_val = eval_loss_dict[key]
-            eval_loss_dict[key] = (count + 1, agg_val + v)
-    
-    # Average loss metrics
-    final_dict = {}
-    for k, (count, agg_val) in eval_loss_dict.items():
-        if count > 0:
-            final_dict[f"eval/{k}"] = agg_val / count
-    return final_dict
-
+from umfavi.envs.env_types import TabularEnv
+from umfavi.utils.training import get_batch
 
 def main(args):
 
@@ -106,7 +61,7 @@ def main(args):
         raise ValueError("At least one feedback type must have samples > 0")
     
     # Create Q-value model (shared across all policies)
-    is_tabular = hasattr(env, 'P') and hasattr(env, 'R')
+    is_tabular = isinstance(env, TabularEnv)
     if is_tabular:
         q_model = TabularQValueModel(env, gamma=args.gamma)
     else:
@@ -284,7 +239,7 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env._R, to_numpy(R_est), gamma=args.gamma)
+                regret = evaluate_regret_tabular(env, R_est, gamma=args.gamma)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
                 regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
