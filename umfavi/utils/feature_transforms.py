@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from typing import Callable
 
 
@@ -59,3 +60,50 @@ def apply_transform(transform: Callable, x: np.ndarray) -> np.ndarray:
     else:
         # Empty array case
         return x
+
+
+def get_batch_features(reward_domain: str, all_obs_features: torch.Tensor, all_act_features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple, tuple]:
+    num_states = all_obs_features.shape[0]
+    num_actions = all_act_features.shape[0]
+    if reward_domain == 's':
+        # Reward only depends on state: R(s)
+        batch_state_features = all_obs_features  # (S, state_dim)
+        batch_action_features = None
+        batch_next_state_features = None
+        batch_shape = (num_states,)
+        expand_shape = (num_states, num_actions, num_states)
+        
+    elif reward_domain == 'sa':
+        # Reward depends on state-action: R(s,a)
+        s_idx, a_idx = np.meshgrid(np.arange(num_states), np.arange(num_actions), indexing='ij')
+        s_flat = s_idx.flatten()
+        a_flat = a_idx.flatten()
+        
+        batch_state_features = all_obs_features[s_flat]    # (S*A, state_dim)
+        batch_action_features = all_act_features[a_flat]  # (S*A, action_dim)
+        batch_next_state_features = None
+        batch_shape = (num_states, num_actions)
+        expand_shape = (num_states, num_actions, num_states)
+        
+    elif reward_domain == 'sas':
+        # Reward depends on state-action-nextstate: R(s,a,s')
+        s_idx, a_idx, sp_idx = np.meshgrid(
+            np.arange(num_states), 
+            np.arange(num_actions), 
+            np.arange(num_states), 
+            indexing='ij'
+        )
+        s_flat = s_idx.flatten()
+        a_flat = a_idx.flatten()
+        sp_flat = sp_idx.flatten()
+        
+        batch_state_features = all_obs_features[s_flat]        # (S*A*S', state_dim)
+        batch_action_features = all_act_features[a_flat]      # (S*A*S', action_dim)
+        batch_next_state_features = all_obs_features[sp_flat]  # (S*A*S', state_dim)
+        batch_shape = (num_states, num_actions, num_states)
+        expand_shape = None  # No expansion needed
+        
+    else:
+        raise ValueError(f"Unknown reward domain: {reward_domain}")
+    
+    return batch_state_features, batch_action_features, batch_next_state_features, batch_shape, expand_shape

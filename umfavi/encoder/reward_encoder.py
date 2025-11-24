@@ -34,7 +34,7 @@ class RewardEncoder(BaseRewardEncoder):
         eps = torch.randn_like(std)
         return mean + std * eps
     
-    def predict_and_sample(self, state_features: torch.Tensor, action_features: torch.Tensor, next_state_features: torch.Tensor) -> torch.Tensor:
+    def predict_and_sample(self, state_features: torch.Tensor, action_features: torch.Tensor, next_state_features: torch.Tensor) -> float:
         with torch.no_grad():
             mean, logvar = self.forward(state_features, action_features, next_state_features)
-            return self.sample(mean, logvar)
+            return self.sample(mean, logvar).item()
