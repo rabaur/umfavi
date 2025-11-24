@@ -13,6 +13,7 @@ setup(
         "numpy>=1.20.0",
         "gymnasium",  # or gym, depending on your usage
         "wandb",
+        "matplotlib",
     ],
     extras_require={
         "dev": [

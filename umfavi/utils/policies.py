@@ -64,3 +64,34 @@ class ExpertPolicy:
         action = np.random.choice(self.env.action_space.n, p=self.policy[state_idx])
         
         return action
+
+
+class TabularExpertPolicy:
+    """
+    Expert policy for any tabular environment with known (P, R).
+    Uses softmax over optimal Q-values.
+    """
+
+    def __init__(self, env: gym.Env, rationality: float = 1.0, gamma: float = 0.99):
+        assert hasattr(env, "P") and env.P is not None, "TabularExpertPolicy requires transition matrix P"
+        assert hasattr(env, "R") and env.R is not None, "TabularExpertPolicy requires reward matrix R"
+        self.env = env
+        self.rationality = rationality
+        self.gamma = gamma
+
+        self.Q_optimal = q_opt(env.P, env.R, self.gamma)
+        self.policy = softmax(self.rationality * self.Q_optimal, dims=1)
+
+    def __call__(self, observation):
+        if isinstance(observation, tuple):
+            observation = observation[0]
+
+        if hasattr(self.env, "obs_to_state_idx"):
+            state_idx = self.env.obs_to_state_idx(observation)
+        elif isinstance(observation, dict) and "state" in observation and hasattr(self.env, "grid_size"):
+            coord = observation["state"]
+            state_idx = coord[0] * self.env.grid_size + coord[1]
+        else:
+            raise ValueError("Cannot map observation to state index for TabularExpertPolicy.")
+
+        return np.random.choice(self.env.action_space.n, p=self.policy[state_idx])

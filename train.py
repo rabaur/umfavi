@@ -11,7 +11,7 @@ from umfavi.data.demonstration_dataset import DemonstrationDataset
 from umfavi.metrics.epic import epic_distance
 from umfavi.metrics.regret import evaluate_regret
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import ExpertPolicy
+from umfavi.utils.policies import ExpertPolicy, UniformPolicy, TabularExpertPolicy
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.encoder.features import MLPFeatureModule
 from umfavi.loglikelihoods.preference import PreferenceDecoder
@@ -136,9 +136,20 @@ def main(args):
             tags=args.wandb_tags.split(",") if args.wandb_tags else None,
         )
 
-    env = GridEnv(
-        **vars(args),
-    )
+    # Create environment
+    if args.env_name == "GridWorld":
+        env = GridEnv(
+            **vars(args),
+        )
+    elif "MiniGrid" in args.env_name:
+        import gymnasium as gym
+        import minigrid # noqa: F401
+        from umfavi.envs.minigrid.minigrid_wrapper import MiniGridWrapper
+
+        gym_env = gym.make(args.env_name)
+        env = MiniGridWrapper(gym_env)
+    else:
+        raise ValueError(f"Unsupported environment name: {args.env_name}")
 
     device = get_device()
         
@@ -162,8 +173,16 @@ def main(args):
     
     # Create policies
     policies = {}
-    policies[FeedbackType.Preference] = ExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
-    policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    if isinstance(env, GridEnv):
+        policies[FeedbackType.Preference] = ExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
+        policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    elif hasattr(env, "P") and env.P is not None and env.R is not None:
+        policies[FeedbackType.Preference] = TabularExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
+        policies[FeedbackType.Demonstration] = TabularExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    else:
+        # When using external environments (e.g., MiniGrid), fall back to a uniform policy
+        policies[FeedbackType.Preference] = UniformPolicy(env.action_space)
+        policies[FeedbackType.Demonstration] = UniformPolicy(env.action_space)
     
     # Create datasets and dataloaders
     _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
@@ -322,13 +341,14 @@ def main(args):
                 else:
                     raise NotImplementedError()
 
-                # Compute epic distance
-                epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
-                eval_metrics["eval/epic_distance"] = epic_dist
-                
-                # Compute expected regret
-                regret = evaluate_regret(R_est=to_numpy(R_est), R_true=env.R, P=env.P, gamma=args.gamma)
-                eval_metrics["eval/regret"] = regret
+                if isinstance(env, GridEnv) and env.R is not None and env.P is not None:
+                    # Compute epic distance
+                    epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
+                    eval_metrics["eval/epic_distance"] = epic_dist
+                    
+                    # Compute expected regret
+                    regret = evaluate_regret(R_est=to_numpy(R_est), R_true=env.R, P=env.P, gamma=args.gamma)
+                    eval_metrics["eval/regret"] = regret
 
                 # Compute evaluation losses
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
@@ -343,19 +363,22 @@ def main(args):
         
         # Visualization 
         if epoch % args.vis_freq == 0:
-            fb_model.eval()
-            with torch.no_grad():
-                fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type])
-                # Log to wandb
-                if args.log_wandb:
-                    wandb.log({
-                        "visualizations/rewards": wandb.Image(fig),
-                        "epoch": epoch,
-                    }, step=global_step)
-                
-                # Close the figure to free memory
-                plt.close(fig)
-            fb_model.train()
+            if isinstance(env, GridEnv):
+                fb_model.eval()
+                with torch.no_grad():
+                    # Use the first available feedback type for visualization
+                    fb_type_vis = next(iter(train_dataloaders.keys()))
+                    fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type_vis])
+                    # Log to wandb
+                    if args.log_wandb:
+                        wandb.log({
+                            "visualizations/rewards": wandb.Image(fig),
+                            "epoch": epoch,
+                        }, step=global_step)
+                    
+                    # Close the figure to free memory
+                    plt.close(fig)
+                fb_model.train()
     
     # Finish wandb run
     wandb.finish()
@@ -367,6 +390,9 @@ if __name__ == "__main__":
 
     # Reproducibility
     parser.add_argument("--seed", type=int, default=0, help="Global seed")
+
+    # Environment
+    parser.add_argument("--env_name", type=str, default="GridWorld", help="Name of the environment")
     
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
