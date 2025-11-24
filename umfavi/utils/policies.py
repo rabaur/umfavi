@@ -7,6 +7,7 @@ from umfavi.utils.tabular import q_opt
 from umfavi.utils.math import softmax
 import stable_baselines3 as sb3
 from umfavi.envs.env_types import TabularEnv
+import matplotlib.pyplot as plt
 
 
 class QValueModel(ABC):
