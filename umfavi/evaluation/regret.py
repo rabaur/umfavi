@@ -104,13 +104,17 @@ def evaluate_regret_non_tabular(
     gamma: float,
     num_samples: int = 1000,
     max_num_steps: int = 100,
-):
+) -> tuple[float, float]:
+    """
+    MC estimate of the expected regret and the mean return of the estimated expert policy.
+    """
     # Train a new DQN model on the wrapped environment with learned reward
     dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=10000)
     q_model = DQNQValueModel(dqn_model)
     est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
     
     regret = 0
+    mean_rew = 0
     for i in range(num_samples):
         # Roll out both policies from the same initial state for fair comparison
         seed = i  # Use iteration index as seed for reproducibility
@@ -122,10 +126,10 @@ def evaluate_regret_non_tabular(
         # Rollout estimated expert policy from the same initial state
         traj_est = rollout(base_env, est_expert_policy, n_steps=max_num_steps, seed=seed)
         ret_est = get_discounted_return(traj_est, gamma)
-        
+        mean_rew += ret_est
         regret += ret_expert - ret_est
     
-    return regret / num_samples
+    return regret / num_samples, mean_rew / num_samples
 
     
 

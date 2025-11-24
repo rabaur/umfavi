@@ -148,7 +148,7 @@ def main(args):
     
     print(f"Training info:")
     for fb_type, length in dataloader_lengths.items():
-        print(f"  {fb_type}: {length} batches per epoch")
+        print(f"  {fb_type.value}: {length} batches per epoch")
     print(f"  Batches processed per update: {len(train_dataloaders)}")
 
     # Initialize dataloader iterators for each feedback type
@@ -258,7 +258,8 @@ def main(args):
                 regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=1000)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+                regret, mean_rew = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+                eval_metrics["eval/mean_rew"] = mean_rew
             eval_metrics["eval/regret"] = regret
 
             # Compute evaluation losses
@@ -329,16 +330,16 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0, help="Global seed")
     
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=64, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=64, help="Length of each trajectory")
+    parser.add_argument("--num_steps", type=int, default=19, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
     parser.add_argument("--pref_trajectory_rationality", type=float, default=10.0, help="Rationality of the expert policy generating the comparison trajectories")
-    parser.add_argument("--demo_rationality", type=float, default=5.0, help="Rationality for expert policy")
+    parser.add_argument("--demo_rationality", type=float, default=20.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
     # Training parameters
@@ -355,8 +356,8 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=10)
     parser.add_argument("--env_name", type=str, default="grid_sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
-    parser.add_argument("--act_transform", choices=["one_hot", None], default=None, help="Apply a transform to the action space")
+    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default="one_hot", help="Apply a transform to the observation space")
+    parser.add_argument("--act_transform", choices=["one_hot", None], default="one_hot", help="Apply a transform to the action space")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions (only for grid environment)")
         
     # Wandb parameters

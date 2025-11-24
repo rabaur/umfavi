@@ -3,6 +3,8 @@ import torch.nn.functional as F
 from torch import nn
 from umfavi.loglikelihoods.base import BaseLogLikelihood
 from umfavi.utils.math import log_var_to_std
+from umfavi.types import SampleKey
+
 class DemonstrationsDecoder(BaseLogLikelihood):
 
     def __init__(self):
@@ -31,7 +33,7 @@ class DemonstrationsDecoder(BaseLogLikelihood):
             ...
         """
         # Extract parameters from kwargs
-        acts = kwargs["actions"].long()
+        acts = kwargs[SampleKey.ACTS].long()
 
         # Get the Q-value estimates
         q_values = kwargs["q_values"]  # (batch_size, num_steps, n_actions)

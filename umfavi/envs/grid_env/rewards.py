@@ -69,7 +69,7 @@ def reward_factory(grid_size: int, reward_type: str, gamma: float):
     n_A = 5
     R = np.zeros((n_S, n_A, n_S))
     if reward_type == "sparse":
-        R = reward_sparse(grid_size, goal_position=(grid_size - 2, grid_size - 2), goal_val=1.0)
+        R = reward_sparse(grid_size, goal_position=(grid_size - 1, grid_size - 1), goal_val=1.0)
     elif reward_type == "dense":
         R = reward_dense(grid_size, gamma)
     elif reward_type == "center":
