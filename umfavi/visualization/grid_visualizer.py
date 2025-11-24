@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from umfavi.utils.torch import to_numpy
 from umfavi.utils.feature_transforms import get_batch_features
 from umfavi.encoder.reward_encoder import RewardEncoder
+from umfavi.types import SampleKey
 
 
 # Action symbols for visualization
@@ -29,7 +30,7 @@ def visualize_state_action_dist(
     counts_flat = None  # will hold counts over N*N cells
 
     for batch in dataloader:
-        states = batch["states"]          # shape: (..., 2) where last dim is (row, col)
+        states = batch[SampleKey.STATES].long()          # shape: (..., 2) where last dim is (row, col)
         # ensure tensor
         if not isinstance(states, torch.Tensor):
             states = torch.as_tensor(states)
@@ -38,22 +39,12 @@ def visualize_state_action_dist(
             device = states.device
             counts_flat = torch.zeros(N * N, dtype=torch.long, device=device)
 
-        # collapse all leading dims, keep last dim 2
+        # collapse all leading dims, idx is already flattened
         # works for (T, 2), (2, T, 2), (B, T, 2), (B, 2, T, 2), etc.
-        idxs = states.reshape(-1, 2)
-
-        rows = idxs[:, 0].long()
-        cols = idxs[:, 1].long()
-
-        # optional safety in case something is slightly out of bounds
-        rows = rows.clamp(0, N - 1)
-        cols = cols.clamp(0, N - 1)
-
-        # map 2D indices to flat indices
-        flat_idx = rows * N + cols
+        idxs = states.reshape(-1).long()
 
         # count occurrences in this batch
-        batch_counts = torch.bincount(flat_idx, minlength=N * N)
+        batch_counts = torch.bincount(idxs, minlength=N * N)
 
         # accumulate
         counts_flat += batch_counts

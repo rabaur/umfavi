@@ -2,8 +2,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from umfavi.envs.grid_env.actions import Action
-from umfavi.envs.grid_env.state_features import state_feature_factory
-from umfavi.envs.grid_env.action_features import action_feature_factory
 from umfavi.envs.grid_env.rewards import reward_factory, succ_state, to_flat_idx
 from umfavi.envs.env_types import TabularEnv
 

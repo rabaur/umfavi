@@ -327,15 +327,15 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0, help="Global seed")
     
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=256, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_pref_samples", type=int, default=64, help="Number of preference samples (0 to disable)")
     parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
+    parser.add_argument("--num_steps", type=int, default=64, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
-    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=10.0, help="Rationality of the expert policy generating the comparison trajectories")
     parser.add_argument("--demo_rationality", type=float, default=5.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
