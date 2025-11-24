@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 from umfavi.types import FeedbackType
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.evaluation.get_batch import get_batch
+from umfavi.utils.training import get_batch
 
 def compute_eval_loss(val_dataloaders: dict[FeedbackType, DataLoader], active_feedback_types: list[FeedbackType], multi_fb_model: MultiFeedbackTypeModel):
     assert not multi_fb_model.training, "Model is not in evaluation mode"

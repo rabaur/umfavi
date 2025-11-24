@@ -29,6 +29,8 @@ from umfavi.envs.grid_env.env import GridEnv
 from umfavi.utils.feature_transforms import to_one_hot
 from umfavi.types import FeedbackType
 from umfavi.envs.env_types import TabularEnv
+from umfavi.utils.feature_transforms import apply_transform
+import numpy as np
 from umfavi.utils.training import get_batch
 
 def main(args):
@@ -83,12 +85,17 @@ def main(args):
     
     # Define action-transform
     act_transform = None
-    if args.action_feature_type == "one_hot":
+    if args.act_transform == "one_hot":
         act_transform = lambda x: to_one_hot(x, env.action_space.n)
     else:
-        raise NotImplementedError(f"Invalid action feature type: {args.action_feature_type}")
+        raise NotImplementedError(f"Invalid action transform: {args.act_transform}")
+    
+    # Define observation-transform
     obs_transform = None
-
+    if args.obs_transform == "one_hot":
+        obs_transform = lambda x: to_one_hot(x, env.observation_space.n)
+    else:
+        raise NotImplementedError(f"Invalid observation transform: {args.obs_transform}")
 
     # Dimensionality of the observation and action-space
     obs_dim = get_obs_dim(env, obs_transform)
@@ -153,6 +160,13 @@ def main(args):
     print(f"{'='*60}\n")
 
     regret_reference_policy = create_expert_policy(env, rationality=float("inf"), q_model=q_model)
+
+    # If the environment is tabular, pre-compute all state-action features
+    all_obs_features = None
+    all_act_features = None
+    if is_tabular:
+        all_obs_features = torch.tensor(apply_transform(obs_transform, np.arange(env.observation_space.n)[:, None])).to(device)
+        all_act_features = torch.tensor(apply_transform(act_transform, np.arange(env.action_space.n)[:, None])).to(device)
 
     for epoch in range(args.num_epochs):
         
@@ -239,7 +253,7 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env, R_est, gamma=args.gamma)
+                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
                 regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
@@ -270,7 +284,7 @@ def main(args):
                 
                 # Use appropriate visualizer based on environment type
                 if isinstance(env, GridEnv):
-                    fig = visualize_grid_rewards(env, fb_model, device, sample_dataloader)
+                    fig = visualize_grid_rewards(env, fb_model.encoder, sample_dataloader, all_obs_features, all_act_features)
                 else:
                     # Assume gymnasium environment (CartPole, etc.)
                     # Get number of actions for the environment
@@ -337,11 +351,11 @@ if __name__ == "__main__":
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--env_name", type=str, default="CartPole-v1")
+    parser.add_argument("--env_name", type=str, default="grid_sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct)")
-    parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
-    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot)")
+    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", "none"], default="one_hot", help="Apply a transform to the observation space")
+    parser.add_argument("--act_transform", choices=["one_hot", "none"], default="one_hot", help="Apply a transform to the action space")
+    parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions (only for grid environment)")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")

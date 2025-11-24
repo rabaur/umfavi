@@ -101,8 +101,8 @@ class PreferenceDataset(Dataset):
 
         # Apply transforms if provided. Transformations are applied per observation or action.
         if self.obs_transform:
-            data[TrajKeys.OBS] = np.vectorize(self.obs_transform)(data[TrajKeys.OBS])
-            data[TrajKeys.NEXT_OBS] = np.vectorize(self.obs_transform)(data[TrajKeys.NEXT_OBS])
+            data[TrajKeys.OBS] = apply_transform(self.obs_transform, data[TrajKeys.OBS])
+            data[TrajKeys.NEXT_OBS] = apply_transform(self.obs_transform, data[TrajKeys.NEXT_OBS])
         if self.act_transform:
             # Create action features by applying transform
             # Use apply_transform to handle transforms that return arrays (e.g., one-hot encoding)

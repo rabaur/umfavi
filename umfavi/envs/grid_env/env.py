@@ -64,13 +64,9 @@ def construct_grid_env(
 def validate_kwargs(kwargs):
     assert "grid_size" in kwargs, "grid_size must be provided"
     assert "reward_type" in kwargs, "reward_type must be provided"
-    assert "state_feature_type" in kwargs, "state_feature_type must be provided"
-    assert "action_feature_type" in kwargs, "action_feature_type must be provided"
     assert "p_rand" in kwargs, "p_rand must be provided"
     assert kwargs["grid_size"] > 0, "grid_size must be positive"
     assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
-    assert kwargs["state_feature_type"] in ["one_hot", "continuous_coordinate", "dct", "embedding"], "Invalid state feature type"
-    assert kwargs["action_feature_type"] in ["one_hot", "embedding"], "Invalid action feature type"
 
 class GridEnv(TabularEnv):
     metadata = {"render_modes": ["human"]}
@@ -83,18 +79,15 @@ class GridEnv(TabularEnv):
             grid_size (int): The number of grid points in each dimension.
             reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff", "five_goals".
             p_rand (float): The probability of transitioning to a random state. Must be in [0, 1].
-            feature_type (str): The type of state feature encoding. See `feature_factory` for options.
-            **kwargs: Additional arguments for `feature_factory`.
+            **kwargs: Additional arguments for `construct_grid_env`.
         """
         super().__init__()
         validate_kwargs(kwargs)
         self.grid_size = kwargs["grid_size"]
         self.reward_type = kwargs["reward_type"]
         self.p_rand = kwargs["p_rand"]
-        self.state_feature_type = kwargs["state_feature_type"]
-        self.action_feature_type = kwargs["action_feature_type"]
-        # Compute S (features) etc. using existing code
         self._P, self._R = construct_grid_env(**kwargs)
+    
         # Action space
         self.action_space = spaces.Discrete(len(Action))
 

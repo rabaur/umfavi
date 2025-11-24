@@ -6,6 +6,7 @@ import os
 from umfavi.utils.tabular import q_opt
 from umfavi.utils.math import softmax
 import stable_baselines3 as sb3
+from umfavi.envs.env_types import TabularEnv
 
 
 class QValueModel(ABC):
@@ -42,7 +43,7 @@ class TabularQValueModel(QValueModel):
     Computes optimal Q-values from transition dynamics P and rewards R.
     """
     
-    def __init__(self, env: gym.Env, gamma: float = 0.99):
+    def __init__(self, env: TabularEnv, gamma: float = 0.99):
         """
         Initialize tabular Q-value model.
         
@@ -50,14 +51,12 @@ class TabularQValueModel(QValueModel):
             env: Tabular environment with P and R attributes
             gamma: Discount factor for Q-value computation
         """
-        if not (hasattr(env, 'P') and hasattr(env, 'R')):
-            raise ValueError(
-                "TabularQValueModel requires environment with P and R attributes."
-            )
         
         self.env = env
         self._gamma = gamma
-        self.Q_optimal = q_opt(env.P, env.R, gamma)
+        R = env.get_reward_matrix()
+        P = env.get_transition_matrix()
+        self.Q_optimal = q_opt(P, R, gamma)
     
     def get_q_values(self, observation) -> np.ndarray:
         """Get Q-values for an observation."""
@@ -276,12 +275,8 @@ class TabularExpertPolicy(ExpertPolicy):
         if isinstance(observation, tuple):
             observation = observation[0]
         
-        # Extract state index from observation
-        coord = observation['state']
-        state_idx = coord[0] * self.env.grid_size + coord[1]
-        
         # Sample action from policy distribution
-        action = np.random.choice(self.env.action_space.n, p=self.policy[state_idx])
+        action = np.random.choice(self.env.action_space.n, p=self.policy[observation])
         
         return action
 
