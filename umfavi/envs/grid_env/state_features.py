@@ -1,5 +1,5 @@
 import numpy as np
-from umfavi.utils.features import one_hot_features, discrete_features
+from umfavi.utils.feature_transforms import to_one_hot
 
 
 def state_feature_factory(feature_type: str, grid_size: int, n_dct_basis_fns: int, **kwargs) -> np.ndarray:

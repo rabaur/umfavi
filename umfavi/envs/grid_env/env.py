@@ -110,10 +110,7 @@ class GridEnv(gym.Env):
             state_feature_shape = self.S.shape[1]
         except IndexError:
             state_feature_shape = self.S.shape[0]
-        self.observation_space = spaces.Dict({
-            "state": spaces.Box(low=np.array([0,0]), high=np.array([self.grid_size-1, self.grid_size-1]), dtype=np.int32, shape=(2,)),
-            "state_features": spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(state_feature_shape,))
-        })
+        self.observation_space = spaces.Dict({spaces.Box(low=-np.inf, high=np.inf, dtype=np.float32, shape=(state_feature_shape,))})
         self.state_coord = None  # will hold (i,j)
         self.state_idx = None
 
@@ -123,10 +120,8 @@ class GridEnv(gym.Env):
         j = 0
         self.state_coord = (i, j)
         self.state_idx = i * self.grid_size + j
-        features = self.S[self.state_idx]
-        obs = {"state": np.array(self.state_coord, dtype=np.int32),
-               "state_features": features}
-        info = {}
+        obs = self.S[self.state_idx]
+        info = {"state_idx": self.state_idx}
         return obs, info
 
     def step(self, action):
@@ -136,13 +131,11 @@ class GridEnv(gym.Env):
         i2, j2 = succ_state(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
         self.state_idx = to_flat_idx(i2, j2, self.grid_size)
-        features = self.S[self.state_idx]
+        obs = self.S[self.state_idx]
         reward = self.R[prev_state_idx, action, self.state_idx]
         terminated = False
         truncated = False
-        info = {}
-        obs = {"state": np.array(self.state_coord, dtype=np.int32),
-               "state_features": features}
+        info = {"state_idx": self.state_idx}
         return obs, reward, terminated, truncated, info
 
     def render(self, mode="human"):

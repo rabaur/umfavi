@@ -1,10 +1,26 @@
+from numpy.typing import NDArray
 import torch
 import numpy as np
 from torch.utils.data import Dataset
-from typing import Callable
+from typing import Callable, Optional, TypedDict
 import gymnasium as gym
-from umfavi.utils.gym import rollout, extract_obs_state_actions, get_rewards
+from umfavi.utils.gym import rollout, unpack_trajectory
 from umfavi.utils.math import sigmoid
+from umfavi.utils.feature_transforms import apply_transform
+from umfavi.types import ObsType, ActType, TrajKeys, SampleKey, FeedbackType
+
+class PreferenceSample(TypedDict):
+    feedback_type: str
+    states: torch.Tensor              # (2, T, state_dim)
+    next_states: torch.Tensor         # (2, T, state_dim)
+    obs: torch.Tensor                 # (2, T, obs_dim)
+    next_obs: torch.Tensor            # (2, T, obs_dim)
+    actions: torch.Tensor             # (2, T, 1) - discrete actions with feature_dim=1
+    action_features: torch.Tensor     # (2, T, action_feature_dim)
+    dones: torch.Tensor               # (2, T, 1) - boolean mask for valid timesteps
+    rationality: torch.Tensor         # scalar
+    gamma: torch.Tensor               # scalar
+    preference: torch.Tensor          # scalar
 
 class PreferenceDataset(Dataset):
     """
@@ -14,11 +30,13 @@ class PreferenceDataset(Dataset):
         self, 
         n_samples: int,   
         n_steps: int,
-        policy: Callable,
+        policy: Callable[[ObsType], ActType],
         env: gym.Env,
         device: str,
         rationality: float = 1.0,
         gamma: float = 0.99,
+        obs_transform: Optional[Callable[[ObsType], ObsType]] = None,
+        act_transform: Optional[Callable[[ActType], ActType]] = None,
     ):
         """
         Initialize preference dataset.
@@ -35,14 +53,11 @@ class PreferenceDataset(Dataset):
         self.rationality = rationality
         self.device = device
         self.gamma = gamma
+        self.obs_transform = obs_transform
+        self.act_transform = act_transform
 
         # Generate trajectory pairs and preferences
-        prefs = self.generate_preferences(policy=policy)
-        self.state_feats = self.state_feats = prefs["state_feats"]
-        self.states = prefs["states"]
-        self.act_feats = prefs["act_feats"]
-        self.acts = prefs["acts"]
-        self.preferences = prefs["preferences"]
+        self.data = self.generate_preferences(policy=policy)
     
     def generate_preferences(self, policy: Callable) -> tuple[list[list[dict]], list[list[dict]], list[int]]:
         """
@@ -53,13 +68,8 @@ class PreferenceDataset(Dataset):
             - trajectory_pairs: List of (traj1, traj2) pairs
             - preferences: List of preferences (0 for traj1, 1 for traj2)
         """
-        preferences = {
-            "state_feats": [],
-            "states": [],
-            "act_feats": [],
-            "acts": [],
-            "preferences": []
-        }
+        data = {k: [] for k in TrajKeys}
+        data[SampleKey.PREFERENCE] = []
         
         for _ in range(self.n_samples):
 
@@ -69,53 +79,113 @@ class PreferenceDataset(Dataset):
             traj2 = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs
-            traj1_data = extract_obs_state_actions(traj1, self.env)
-            traj2_data = extract_obs_state_actions(traj2, self.env)
+            traj1_dict = unpack_trajectory(traj1)
+            traj2_dict = unpack_trajectory(traj2)
 
             # Compute true returns
-            rews1 = get_rewards(traj1)
-            rews2 = get_rewards(traj2)
-            rew_sum1 = sum(rews1)
-            rew_sum2 = sum(rews2)
+            rews1 = np.array(traj1_dict[TrajKeys.REWS])
+            rews2 = np.array(traj2_dict[TrajKeys.REWS])
+
+            r1 = np.nansum(rews1, dtype=np.float32)
+            r2 = np.nansum(rews2, dtype=np.float32)
 
             # Generate preference using sigmoid
-            preference_prob = sigmoid(self.rationality * (rew_sum2 - rew_sum1))
+            preference_prob = sigmoid(self.rationality * (r1 - r2))
+            data[SampleKey.PREFERENCE].append(preference_prob)
             
             # Append the newly generated trajectories
-            preferences["state_feats"].append(np.stack([traj1_data["state_feats"], traj2_data["state_feats"]], axis=0))
-            preferences["states"].append(np.stack([traj1_data["states"], traj2_data["states"]], axis=0))
-            preferences["act_feats"].append(np.stack([traj1_data["act_feats"], traj2_data["act_feats"]], axis=0))
-            preferences["acts"].append(np.stack([traj1_data["acts"], traj2_data["acts"]], axis=0))
-            preferences["preferences"].append(preference_prob)
+            for k in traj1_dict.keys():
+                data[k].append(np.stack([traj1_dict[k], traj2_dict[k]], axis=0))
         
-        preferences = {k: np.stack(v, axis=0) for k, v in preferences.items()}
+        data = {k: np.stack(v, axis=0) for k, v in data.items()}
+
+        # Apply transforms if provided. Transformations are applied per observation or action.
+        if self.obs_transform:
+            data[TrajKeys.OBS] = np.vectorize(self.obs_transform)(data[TrajKeys.OBS])
+            data[TrajKeys.NEXT_OBS] = np.vectorize(self.obs_transform)(data[TrajKeys.NEXT_OBS])
+        if self.act_transform:
+            # Create action features by applying transform
+            # Use apply_transform to handle transforms that return arrays (e.g., one-hot encoding)
+            transformed_actions = apply_transform(self.act_transform, data[TrajKeys.ACTS])
+            data[SampleKey.ACT_FEATS] = transformed_actions
             
-        return preferences
+        return data
+    
+    def _to_torch(self, x: NDArray):
+        return torch.tensor(x, dtype=torch.float32).to(self.device)
+    
+    def _drop_last_t(self, x: NDArray):
+        """
+        Drops data corresponding to last time-step.
+        Assumes x has shape (..., T, F) where F is the feature dimension (may be 1).
+        """
+        return x[..., :-1, :]
+    
+    def _drop_first_t(self, x: NDArray):
+        """
+        Drops data corresponding to first time-step.
+        Assumes x has shape (..., T, F) where F is the feature dimension (may be 1).
+        """
+        return x[..., 1:, :]
     
     def __len__(self):
         return self.n_samples
     
-    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        state_feats_tensor = torch.tensor(self.state_feats[idx][..., :-1, :]).to(self.device)
-        next_state_feats_tensor = torch.tensor(self.state_feats[idx][..., 1:, :]).to(self.device)
-        states_tensor = torch.tensor(self.states[idx][..., :-1, :]).to(self.device)
-        next_states_tensor = torch.tensor(self.states[idx][..., 1:, :]).to(self.device)
-        act_feats_tensor = torch.tensor(self.act_feats[idx][..., :-1, :]).to(self.device)
+    def __getitem__(self, i) -> PreferenceSample:
+        """
+        Gets a single preference feedback sample.
 
-        # Does not have feature dimension
-        acts_tensor = torch.tensor(self.acts[idx][..., :-1]).to(self.device)
-        preference_tensor = torch.tensor(self.preferences[idx]).to(self.device, dtype=torch.float32)
-        rationality_tensor = torch.tensor(self.rationality).to(self.device, dtype=torch.float32)
-        gamma_tensor = torch.tensor(self.gamma).to(self.device, dtype=torch.float32)
+        Returns:
+            The i-th PreferenceSample.
+        """
+
+        # Observations
+        obs = self.data[TrajKeys.OBS][i]
+        obs_tensor = self._to_torch(self._drop_last_t(obs))
+        next_obs_tensor = self._to_torch(self._drop_first_t(obs))
+        
+        # States (from environment info dict, if available)
+        if "states" in self.data:
+            states = self.data["states"][i]
+            states_tensor = self._to_torch(self._drop_last_t(states))
+            next_states_tensor = self._to_torch(self._drop_first_t(states))
+        else:
+            # If no separate states, use observations as states
+            states_tensor = obs_tensor
+            next_states_tensor = next_obs_tensor
+
+        # Action features (from transform, if available)
+        if SampleKey.ACT_FEATS in self.data:
+            action_feats = self.data[SampleKey.ACT_FEATS][i]
+            action_feats_tensor = self._to_torch(self._drop_last_t(action_feats))
+        else:
+            # If no action features, use raw actions
+            actions_raw = self.data[TrajKeys.ACTS][i]
+            action_feats_tensor = self._to_torch(self._drop_last_t(actions_raw))
+
+        # Actions (discrete, no feature dimension)
+        actions = self.data[TrajKeys.ACTS][i]
+        actions_tensor = self._to_torch(self._drop_last_t(actions))
+        
+        # Dones (mask for valid/invalid timesteps)
+        dones = self.data[TrajKeys.DONES][i]
+        dones_tensor = self._to_torch(self._drop_last_t(dones))
+        
+        # Scalars
+        preference_tensor = self._to_torch(self.data[SampleKey.PREFERENCE][i])
+        rationality_tensor = self._to_torch(self.rationality)
+        gamma_tensor = self._to_torch(self.gamma)
+        
         return {
-            "feedback_type": "preference",
-            "states": states_tensor,
-            "state_features": state_feats_tensor,
-            "next_states": next_states_tensor,
-            "next_state_features": next_state_feats_tensor,
-            "actions": acts_tensor,
-            "action_features": act_feats_tensor,
-            "targets": preference_tensor,
-            "rationality": rationality_tensor,
-            "gamma": gamma_tensor,
+            SampleKey.FEEDBACK_TYPE: FeedbackType.PREFERENCE,
+            SampleKey.STATES: states_tensor,
+            SampleKey.NEXT_STATES: next_states_tensor,
+            SampleKey.OBS: obs_tensor,
+            SampleKey.NEXT_OBS: next_obs_tensor,
+            SampleKey.ACTS: actions_tensor,
+            SampleKey.ACT_FEATS: action_feats_tensor,
+            SampleKey.DONES: dones_tensor,
+            SampleKey.RATIONALITY: rationality_tensor,
+            SampleKey.GAMMA: gamma_tensor,
+            SampleKey.PREFERENCE: preference_tensor
         }

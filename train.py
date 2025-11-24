@@ -1,60 +1,38 @@
 import argparse
+import stable_baselines3 as sb3
 import torch
 import wandb
 import numpy as np
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
 from typing import Any
-from umfavi.envs.grid_env.env import GridEnv
-from umfavi.data.preference_dataset import PreferenceDataset
-from umfavi.data.demonstration_dataset import DemonstrationDataset
+from torch.utils.data import DataLoader
+from umfavi import multi_fb_model
+from umfavi.envs.get_env import get_env
+from umfavi.data.get_dataset import get_dataset
+from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.metrics.epic import epic_distance
-from umfavi.metrics.regret import evaluate_regret
+from umfavi.metrics.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.policies import ExpertPolicy, UniformPolicy, TabularExpertPolicy
+from umfavi.utils.policies import (
+    ExpertPolicy, 
+    create_expert_policy,
+    load_or_train_dqn,
+    DQNQValueModel,
+    TabularQValueModel
+)
+from umfavi.utils.gym import get_obs_dim, get_act_dim
 from umfavi.encoder.reward_encoder import RewardEncoder
-from umfavi.encoder.features import MLPFeatureModule
+from umfavi.encoder.feature_modules import MLPFeatureModule
 from umfavi.loglikelihoods.preference import PreferenceDecoder
 from umfavi.loglikelihoods.demonstrations import DemonstrationsDecoder
 from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device, to_numpy
 from umfavi.losses import elbo_loss
-from umfavi.grid_env_visualizer import visualize_rewards
-from umfavi.feedback_types import FeedbackType
-
-
-def dataset_factory(active_feedback_types, args, env, policies, device):
-    datasets = {}
-    dataloaders = {}
-    if FeedbackType.Preference in active_feedback_types:
-        pref_dataset = PreferenceDataset(
-            n_samples=args.num_pref_samples,
-            n_steps=args.num_steps,
-            env=env,
-            policy=policies[FeedbackType.Preference],
-            device=device,
-            rationality=args.pref_rationality,
-            gamma=args.gamma,
-        )
-        datasets[FeedbackType.Preference] = pref_dataset
-        dataloaders[FeedbackType.Preference] = DataLoader(pref_dataset, batch_size=args.batch_size, shuffle=True)
-        print(f"Created preference dataset with {len(pref_dataset)} samples")
-
-    if FeedbackType.Demonstration in active_feedback_types:
-        demo_dataset = DemonstrationDataset(
-            n_samples=args.num_demo_samples,
-            n_steps=args.num_steps,
-            env=env,
-            policy=policies[FeedbackType.Demonstration],
-            device=device,
-            rationality=args.demo_rationality,
-            gamma=args.gamma,
-            td_error_weight=args.td_error_weight,
-        )
-        datasets[FeedbackType.Demonstration] = demo_dataset
-        dataloaders[FeedbackType.Demonstration] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
-        print(f"Created demonstration dataset with {len(demo_dataset)} samples")
-    return datasets, dataloaders
+from umfavi.visualization.grid_visualizer import visualize_rewards as visualize_grid_rewards
+from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
+from umfavi.envs.grid_env.env import GridEnv
+from umfavi.utils.feature_transforms import to_one_hot
+from umfavi.types import FeedbackType
 
 
 def get_batch(dloader_iters, dataloaders, fb_type):
@@ -67,7 +45,7 @@ def get_batch(dloader_iters, dataloaders, fb_type):
     return batch
 
 
-def compute_eval_loss(val_dataloaders, active_feedback_types, multi_fb_model: MultiFeedbackTypeModel):
+def compute_eval_loss(val_dataloaders: dict[FeedbackType, DataLoader], active_feedback_types: list[FeedbackType], multi_fb_model: MultiFeedbackTypeModel):
     assert not multi_fb_model.training, "Model is not in evaluation mode"
     dloader_iters = {fb_type: iter(val_dataloaders[fb_type]) for fb_type in active_feedback_types}
     eval_loss_dict = {}
@@ -84,7 +62,7 @@ def compute_eval_loss(val_dataloaders, active_feedback_types, multi_fb_model: Mu
         
         # Log feedback-specific metrics
         for k, v in loss_dict.items():
-            key = f"{k}_{fb_type}"
+            key = f"{k}_{fb_type.value}"
             if key not in eval_loss_dict:
                 eval_loss_dict[key] = (0, 0.0)
             count, agg_val = eval_loss_dict[key]
@@ -98,18 +76,18 @@ def compute_eval_loss(val_dataloaders, active_feedback_types, multi_fb_model: Mu
     return final_dict
         
 
-def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: str):
+def update_epoch_log_dict(epoch_log_dict: dict[str, tuple[int, Any]], metrics_dict: dict[str, Any], fb_type: FeedbackType):
     epoch_log_dict = dict(epoch_log_dict)
     for key, value in metrics_dict.items():
         if key in epoch_log_dict:
             prev_count, prev_val = epoch_log_dict[key]
             updated_vals = (prev_count + 1, prev_val + value)
             epoch_log_dict[key] = updated_vals
-            epoch_log_dict[f"{key}_{fb_type}"] = updated_vals
+            epoch_log_dict[f"{key}_{fb_type.value}"] = updated_vals
         else:
             initial_value = (1, value)
             epoch_log_dict[key] = initial_value
-            epoch_log_dict[f"{key}_{fb_type}"] = initial_value
+            epoch_log_dict[f"{key}_{fb_type.value}"] = initial_value
     return epoch_log_dict
 
 
@@ -150,19 +128,15 @@ def main(args):
         env = MiniGridWrapper(gym_env)
     else:
         raise ValueError(f"Unsupported environment name: {args.env_name}")
+    
+    env = get_env(**vars(args))
 
     device = get_device()
-        
-    # Get all state-action features for evaluation
-    n_states = env.S.shape[0]
-    n_actions = env.action_space.n
-    state_feats_flat = torch.tensor(env.S).to(device=device)
-    action_feats = torch.tensor(env.A).to(device=device)
 
     # Register feedback types and their sample counts
     feedback_config = {
-        FeedbackType.Preference: args.num_pref_samples,
-        FeedbackType.Demonstration: args.num_demo_samples,
+        FeedbackType.PREFERENCE: args.num_pref_samples,
+        FeedbackType.DEMONSTRATION: args.num_demo_samples,
     }
     
     # Filter out feedback types with 0 samples
@@ -171,38 +145,50 @@ def main(args):
     if not active_feedback_types:
         raise ValueError("At least one feedback type must have samples > 0")
     
-    # Create policies
-    policies = {}
-    if isinstance(env, GridEnv):
-        policies[FeedbackType.Preference] = ExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
-        policies[FeedbackType.Demonstration] = ExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
-    elif hasattr(env, "P") and env.P is not None and env.R is not None:
-        policies[FeedbackType.Preference] = TabularExpertPolicy(env=env, rationality=args.pref_trajectory_rationality, gamma=args.gamma)
-        policies[FeedbackType.Demonstration] = TabularExpertPolicy(env=env, rationality=args.demo_rationality, gamma=args.gamma)
+    # Create Q-value model (shared across all policies)
+    is_tabular = hasattr(env, 'P') and hasattr(env, 'R')
+    if is_tabular:
+        q_model = TabularQValueModel(env, gamma=args.gamma)
     else:
-        # When using external environments (e.g., MiniGrid), fall back to a uniform policy
-        policies[FeedbackType.Preference] = UniformPolicy(env.action_space)
-        policies[FeedbackType.Demonstration] = UniformPolicy(env.action_space)
+        dqn_model = load_or_train_dqn(env, gamma=args.gamma, train_if_missing=True)
+        q_model = DQNQValueModel(dqn_model)
     
-    # Create datasets and dataloaders
-    _, train_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
-    _, val_dataloaders = dataset_factory(active_feedback_types, args, env, policies, device)
+    # Create policies (all sharing the same Q-value model)
+    policies = {}
+    policies[FeedbackType.PREFERENCE] = create_expert_policy(
+        env=env, 
+        rationality=args.pref_trajectory_rationality, 
+        q_model=q_model
+    )
+    policies[FeedbackType.DEMONSTRATION] = create_expert_policy(
+        env=env, 
+        rationality=args.demo_rationality, 
+        q_model=q_model
+    )
+    
+    # Define action-transform
+    act_transform = None
+    if args.action_feature_type == "one_hot":
+        act_transform = lambda x: to_one_hot(x, env.action_space.n)
+    else:
+        raise NotImplementedError(f"Invalid action feature type: {args.action_feature_type}")
+    obs_transform = None
 
-    # Create feature module and encoder
-    obs_dim = env.observation_space["state_features"].shape[0]
-    act_dim = env.action_space.n
-    learn_embedding = args.state_feature_type == "embedding"
+
+    # Dimensionality of the observation and action-space
+    obs_dim = get_obs_dim(env, obs_transform)
+    act_dim = get_act_dim(env, act_transform)
+
+    # Create datasets and dataloaders
+    _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
+    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
+
 
     feature_module = MLPFeatureModule(
         obs_dim,
         act_dim,
         args.encoder_hidden_sizes,
-        reward_domain=args.reward_domain,
-        learn_embedding=learn_embedding,
-        state_embedding_size=args.state_embedding_size,
-        action_embedding_size=args.action_embedding_size,
-        n_actions=n_actions,
-        n_states=n_states
+        reward_domain=args.reward_domain
     )
     reward_encoder = RewardEncoder(feature_module)
 
@@ -212,24 +198,19 @@ def main(args):
     Q_value_model = MLPFeatureModule(
         state_dim=obs_dim,
         action_dim=act_dim,  # Not used since reward_domain='s'
-        learn_embedding=learn_embedding,
         hidden_sizes=args.q_value_hidden_sizes + [act_dim],
-        state_embedding_size=args.state_embedding_size,
-        action_embedding_size=args.action_embedding_size,
-        n_states=n_states,
-        n_actions=n_actions,
         reward_domain='s',  # Q-value model only acts on state features
         activate_last_layer=False  # Q-values are in R
     )
     
-    if FeedbackType.Preference in active_feedback_types:
+    if FeedbackType.PREFERENCE in active_feedback_types:
         preference_decoder = PreferenceDecoder()
-        decoders[FeedbackType.Preference] = preference_decoder
+        decoders[FeedbackType.PREFERENCE] = preference_decoder
     
-    if FeedbackType.Demonstration in active_feedback_types:
+    if FeedbackType.DEMONSTRATION in active_feedback_types:
         # Q-value model is just MLPFeatureModule with reward_domain='s' and last layer = n_actions
         demonstration_decoder = DemonstrationsDecoder()
-        decoders[FeedbackType.Demonstration] = demonstration_decoder
+        decoders[FeedbackType.DEMONSTRATION] = demonstration_decoder
     
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
@@ -259,6 +240,12 @@ def main(args):
     # Steps per epoch is determined by the feedback type with the most batches
     steps_per_epoch = max(len(dl) for dl in train_dataloaders.values())
 
+    print(f"\n{'='*60}")
+    print(f"Starting training for {args.num_epochs} epochs")
+    print(f"{'='*60}\n")
+
+    regret_reference_policy = create_expert_policy(env, rationality=float("inf"), q_model=q_model)
+
     for epoch in range(args.num_epochs):
         
         # Training
@@ -266,6 +253,8 @@ def main(args):
         
         # Track losses per feedback type
         epoch_log_dict = {}
+        
+        print(f"Epoch {epoch}/{args.num_epochs-1} - Training...")
         
         for step in range(steps_per_epoch):
 
@@ -316,8 +305,14 @@ def main(args):
             optimizer.step()
             optimizer.zero_grad()
             
-            # Log to wandb every N steps
+            # Log to wandb and console every N steps
             if (global_step) % args.log_every_n_steps == 0:
+                # Console logging
+                nll = aggregated_loss_dict.get("negative_log_likelihood", 0.0)
+                kl = aggregated_loss_dict.get("kl_divergence", 0.0)
+                td = aggregated_loss_dict.get("td_error", 0.0)
+                print(f"  Step {step}/{steps_per_epoch-1} | Loss: {total_loss.item():.4f} | NLL: {nll:.4f} | KL: {kl:.4f} | TD: {td:.4f}")
+                
                 if args.log_wandb:
                     wandb_log_dict = {f"batch/{key}": value for key, value in aggregated_loss_dict.items()}
                     wandb_log_dict["batch/total_loss"] = total_loss.item()
@@ -329,29 +324,40 @@ def main(args):
         # -----------------------------------------------
         if epoch % args.eval_every_n_epochs == 0:
             
+            print(f"  Evaluating...")
             fb_model.eval()
             eval_metrics = {}
+
+            # Compute epic distance
+            # epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
+            # eval_metrics["eval/epic_distance"] = epic_dist
+            
+            # Compute expected regret
+            if args.env_name == "CartPole-v1":
+                wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
+                regret = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+            else:
+                regret = np.inf
+            eval_metrics["eval/regret"] = regret
+
+            # Compute evaluation losses
             with torch.no_grad():
-
-                # Compute the mean estimated reward per state-action pair
-                if args.reward_domain == "s":
-                    R_est_mean, _ = fb_model.encoder(state_feats_flat, None, None)
-                    R_est_mean = R_est_mean.squeeze()
-                    R_est = torch.broadcast_to(R_est_mean[:, None, None], (n_states, n_actions, n_states))
-                else:
-                    raise NotImplementedError()
-
-                if isinstance(env, GridEnv) and env.R is not None and env.P is not None:
-                    # Compute epic distance
-                    epic_dist = epic_distance(env.R, to_numpy(R_est), gamma=args.gamma)
-                    eval_metrics["eval/epic_distance"] = epic_dist
-                    
-                    # Compute expected regret
-                    regret = evaluate_regret(R_est=to_numpy(R_est), R_true=env.R, P=env.P, gamma=args.gamma)
-                    eval_metrics["eval/regret"] = regret
-
-                # Compute evaluation losses
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
+
+
+            # Console logging of evaluation metrics
+            print(f"  Evaluation Results:")
+            if "eval/epic_distance" in eval_metrics:
+                print(f"    EPIC Distance: {eval_metrics['eval/epic_distance']:.6f}")
+            if "eval/regret" in eval_metrics:
+                print(f"    Regret: {eval_metrics['eval/regret']:.6f}")
+            if "eval/negative_log_likelihood" in eval_metrics:
+                print(f"    Eval NLL: {eval_metrics['eval/negative_log_likelihood']:.4f}")
+            if "eval/kl_divergence" in eval_metrics:
+                print(f"    Eval KL: {eval_metrics['eval/kl_divergence']:.4f}")
+            if "eval/td_error" in eval_metrics:
+                print(f"    Eval TD Error: {eval_metrics['eval/td_error']:.4f}")
+            print()
 
             # Log to wandb
             if args.log_wandb:
@@ -363,25 +369,47 @@ def main(args):
         
         # Visualization 
         if epoch % args.vis_freq == 0:
-            if isinstance(env, GridEnv):
-                fb_model.eval()
-                with torch.no_grad():
-                    # Use the first available feedback type for visualization
-                    fb_type_vis = next(iter(train_dataloaders.keys()))
-                    fig = visualize_rewards(env, fb_model, device, train_dataloaders[fb_type_vis])
-                    # Log to wandb
-                    if args.log_wandb:
-                        wandb.log({
-                            "visualizations/rewards": wandb.Image(fig),
-                            "epoch": epoch,
-                        }, step=global_step)
+            print(f"  Generating visualization...")
+            fb_model.eval()
+            with torch.no_grad():
+                # Get first available dataloader for trajectory visualization
+                sample_dataloader = next(iter(train_dataloaders.values()))
+                
+                # Use appropriate visualizer based on environment type
+                if isinstance(env, GridEnv):
+                    fig = visualize_grid_rewards(env, fb_model, device, sample_dataloader)
+                else:
+                    # Assume gymnasium environment (CartPole, etc.)
+                    # Get number of actions for the environment
+                    from gymnasium import spaces
+                    if isinstance(env.action_space, spaces.Discrete):
+                        num_actions = env.action_space.n
+                    else:
+                        num_actions = env.action_space.shape[0]
                     
-                    # Close the figure to free memory
-                    plt.close(fig)
-                fb_model.train()
+                    fig = visualize_cartpole_rewards(
+                        fb_model, device, sample_dataloader,
+                        num_actions=num_actions
+                    )
+                
+                # Log to wandb
+                if args.log_wandb:
+                    wandb.log({
+                        "visualizations/rewards": wandb.Image(fig),
+                        "epoch": epoch,
+                    }, step=global_step)
+                
+                # Close the figure to free memory
+                plt.close(fig)
+            fb_model.train()
     
     # Finish wandb run
-    wandb.finish()
+    print(f"\n{'='*60}")
+    print(f"Training completed!")
+    print(f"{'='*60}\n")
+    
+    if args.log_wandb:
+        wandb.finish()
         
 
 
@@ -395,15 +423,15 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", type=str, default="GridWorld", help="Name of the environment")
     
     # Dataset parameters
-    parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
-    parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
+    parser.add_argument("--num_pref_samples", type=int, default=256, help="Number of preference samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=0, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=32, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
-    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality for the expert policy generating the comparison trajectories")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
     parser.add_argument("--demo_rationality", type=float, default=5.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     
@@ -419,13 +447,11 @@ if __name__ == "__main__":
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--reward_type", type=str, default="sparse")
+    parser.add_argument("--env_name", type=str, default="CartPole-v1")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct, embedding)")
+    parser.add_argument("--state_feature_type", type=str, default="one_hot", help="Type of state feature encoding (one_hot, continuous_coordinate, dct)")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions")
-    parser.add_argument("--state_embedding_size", type=int, default=32, help="Only used if state_feature_type=='embedding'")
-    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot, embedding)")
-    parser.add_argument("--action_embedding_size", type=int, default=8, help="Only used if state_feature_type=='embedding")
+    parser.add_argument("--action_feature_type", type=str, default="one_hot", help="Type of action feature encoding (one_hot)")
     
     # Visualization parameters
     parser.add_argument("--visualize_dataset", action="store_true", help="Visualize dataset state-action visitation before training")

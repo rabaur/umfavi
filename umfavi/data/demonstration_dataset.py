@@ -2,9 +2,11 @@ import torch
 import numpy as np
 from numpy.typing import NDArray
 from torch.utils.data import Dataset
-from typing import Callable
+from typing import Callable, Optional
 import gymnasium as gym
-from umfavi.utils.gym import extract_obs_state_actions, rollout
+from umfavi.utils.gym import unpack_trajectory, rollout
+from umfavi.utils.feature_transforms import apply_transform
+from umfavi.types import TrajKeys, SampleKey, FeedbackType
 
 class DemonstrationDataset(Dataset):
     """
@@ -19,7 +21,9 @@ class DemonstrationDataset(Dataset):
         device: str,
         rationality: float = 1.0,
         gamma: float = 0.99,
-        td_error_weight: float = 1.0
+        td_error_weight: float = 1.0,
+        obs_transform: Optional[Callable] = None,
+        act_transform: Optional[Callable] = None
     ):
         """
         Initialize demonstration dataset.
@@ -30,11 +34,11 @@ class DemonstrationDataset(Dataset):
             policy: Expert policy to generate demonstrations
             env: Gymnasium environment
             device: Device to store tensors on ('cpu' or 'cuda')
-            obs_transform: Optional transformation for observations
-            act_transform: Optional transformation for actions
             rationality: Rationality parameter for expert policy
             gamma: Discount factor for Q-value computation
             td_error_weight: Weight for TD-error constraint in demonstrations
+            obs_transform: Optional transformation for observations
+            act_transform: Optional transformation for actions
         """
         self.n_samples = n_samples
         self.n_steps = n_steps
@@ -43,45 +47,65 @@ class DemonstrationDataset(Dataset):
         self.rationality = rationality
         self.gamma = gamma
         self.td_error_weight = td_error_weight
+        self.obs_transform = obs_transform
+        self.act_transform = act_transform
         
         # Generate demonstrations
-        demos = self.generate_demonstrations(policy=policy)
-        self.state_feats = demos["state_feats"]
-        self.states = demos["states"]
-        self.act_feats = demos["act_feats"]
-        self.acts = demos["acts"]
+        self.data = self.generate_demonstrations(policy=policy)
     
     def generate_demonstrations(self, policy: Callable) -> dict:
         """
         Generate expert demonstration trajectories.
         
         Returns:
-            Dictionary with:
-            - state_feats: List of state feature sequences
-            - states: List of state sequences
-            - act_feats: List of action feature sequences
-            - acts: List of action sequences
+            Dictionary with trajectory data using TrajectoryKey enums.
         """
         data = {
-            "state_feats": [],
-            "states": [],
-            "act_feats": [],
-            "acts": [],
+            TrajKeys.OBS: [],
+            TrajKeys.ACTS: [],
         }
         
-        for _ in range(self.n_samples):
+        # Also collect states and action features if available from env info
+        collect_states = False
+        collect_action_features = False
+        
+        for i in range(self.n_samples):
             # Generate trajectory using the expert policy
             # Add one extra step to the trajectory to get the next observation
             trajectory = rollout(self.env, policy, n_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectory
-            traj_data = extract_obs_state_actions(trajectory, self.env)
+            traj_data = unpack_trajectory(trajectory)
+
+            # First iteration: check what keys are available
+            if i == 0:
+                collect_states = "states" in traj_data
+                collect_action_features = "action_features" in traj_data
+                if collect_states:
+                    data["states"] = []
+                if collect_action_features:
+                    data["action_features"] = []
 
             # Append the newly generated trajectory
-            data["state_feats"].append(traj_data["state_feats"])
-            data["states"].append(traj_data["states"])
-            data["act_feats"].append(traj_data["act_feats"])
-            data["acts"].append(traj_data["acts"])
+            data[TrajKeys.OBS].append(traj_data[TrajKeys.OBS])
+            data[TrajKeys.ACTS].append(traj_data[TrajKeys.ACTS])
+            
+            if collect_states:
+                data["states"].append(traj_data["states"])
+            if collect_action_features:
+                data["action_features"].append(traj_data["action_features"])
+        
+        # Stack all trajectories
+        data = {k: np.stack(v, axis=0) for k, v in data.items()}
+        
+        # Apply transforms if provided
+        if self.obs_transform:
+            data[TrajKeys.OBS] = np.vectorize(self.obs_transform)(data[TrajKeys.OBS])
+        
+        if self.act_transform:
+            # Use apply_transform to handle transforms that return arrays (e.g., one-hot encoding)
+            transformed_actions = apply_transform(self.act_transform, data[TrajKeys.ACTS])
+            data[SampleKey.ACT_FEATS] = transformed_actions
         
         return data
     
@@ -96,41 +120,50 @@ class DemonstrationDataset(Dataset):
             idx: Index of the sample
             
         Returns:
-            Dictionary with:
-            - feedback_type: "demonstration"
-            - state_features: State features tensor
-            - acts: Action sequence tensor (targets for behavioral cloning)
-            - targets: Same as acts (for consistency with other datasets)
+            Dictionary with demonstration data using SampleKey enums.
         """
 
-        # Get the demonstration sequence
-        state_feats = self.state_feats[idx][:-1]
-        next_state_feats = self.state_feats[idx][1:]
-        states = self.states[idx][:-1]
-        next_states = self.states[idx][1:]
-        acts = self.acts[idx][:-1]
-        act_feats = self.act_feats[idx][:-1]
+        # Get the demonstration sequence (drop last for current, drop first for next)
+        obs = self.data[TrajKeys.OBS][idx]
+        obs_tensor = torch.tensor(np.array(obs[:-1])).to(self.device)
+        next_obs_tensor = torch.tensor(np.array(obs[1:])).to(self.device)
         
-        # Convert observations to tensors
-        state_feats_tensor = torch.tensor(np.array(state_feats)).to(self.device)
-        next_state_feats_tensor = torch.tensor(np.array(next_state_feats)).to(self.device)
-        states_tensor = torch.tensor(np.array(states)).to(self.device)
-        next_states_tensor = torch.tensor(np.array(next_states)).to(self.device)
+        # Get states if available, otherwise use observations
+        if "states" in self.data:
+            states = self.data["states"][idx]
+            states_tensor = torch.tensor(np.array(states[:-1])).to(self.device)
+            next_states_tensor = torch.tensor(np.array(states[1:])).to(self.device)
+        else:
+            states_tensor = obs_tensor
+            next_states_tensor = next_obs_tensor
 
-        # Convert actions to tensors
-        acts_tensor = torch.tensor(np.array(acts)).to(self.device)
-        act_feats_tensor = torch.tensor(np.array(act_feats)).to(self.device)
+        # Get actions
+        actions = self.data[TrajKeys.ACTS][idx]
+        actions_tensor = torch.tensor(np.array(actions[:-1])).to(self.device)
+        
+        # Get action features if available (from transform or environment info)
+        if SampleKey.ACT_FEATS in self.data:
+            # From transform
+            action_feats = self.data[SampleKey.ACT_FEATS][idx]
+            action_feats_tensor = torch.tensor(np.array(action_feats[:-1])).to(self.device)
+        elif "action_features" in self.data:
+            # From environment info
+            action_feats = self.data["action_features"][idx]
+            action_feats_tensor = torch.tensor(np.array(action_feats[:-1])).to(self.device)
+        else:
+            # Use raw actions as fallback
+            action_feats_tensor = actions_tensor
         
         return {
-            "feedback_type": "demonstration",
-            "states": states_tensor,
-            "state_features": state_feats_tensor,
-            "next_states": next_states_tensor,
-            "next_state_features": next_state_feats_tensor,
-            "actions": acts_tensor,
-            "action_features": act_feats_tensor,
-            "targets": acts_tensor,
-            "rationality": torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
-            "gamma": torch.tensor(self.gamma).to(self.device, dtype=torch.float32),
-            "td_error_weight": torch.tensor(self.td_error_weight).to(self.device, dtype=torch.float32),
+            SampleKey.FEEDBACK_TYPE: FeedbackType.DEMONSTRATION,
+            SampleKey.STATES: states_tensor,
+            SampleKey.OBS: obs_tensor,
+            SampleKey.NEXT_STATES: next_states_tensor,
+            SampleKey.NEXT_OBS: next_obs_tensor,
+            SampleKey.ACTS: actions_tensor,
+            SampleKey.ACT_FEATS: action_feats_tensor,
+            SampleKey.TARGETS: actions_tensor,
+            SampleKey.RATIONALITY: torch.tensor(self.rationality).to(self.device, dtype=torch.float32),
+            SampleKey.GAMMA: torch.tensor(self.gamma).to(self.device, dtype=torch.float32),
+            SampleKey.TD_ERROR_WEIGHT: torch.tensor(self.td_error_weight).to(self.device, dtype=torch.float32),
         }
