@@ -12,8 +12,9 @@ from umfavi.utils.policies import (
 )
 from umfavi.envs.env_types import TabularEnv
 from umfavi.encoder.reward_encoder import RewardEncoder
-from umfavi.utils.feature_transforms import get_batch_features
+from umfavi.utils.feature_transforms import get_feature_combinations
 from umfavi.utils.gym import rollout, get_discounted_return
+from umfavi.utils.torch import to_numpy
 
 
 def value_under_policy(P, R_true, gamma, pi):
@@ -55,7 +56,7 @@ def evaluate_regret_tabular(
     # Construct all state-action-next_state features to compute the estimated reward matrix
     num_states = P.shape[0]  # == num_next_states
     num_actions = P.shape[1]
-    regret = 0
+
     # Compute optimal Q-values for the true reward
     Q_true_opt = q_opt(P, R_true, gamma, max_iter=max_iter, tol=tol)
     V_true_star = np.max(Q_true_opt, axis=1)           # (S,)
@@ -63,38 +64,31 @@ def evaluate_regret_tabular(
     # Optimize batched inference based on reward domain
     reward_domain = encoder.features.reward_domain
     
-    batch_state_features, batch_action_features, batch_next_state_features, batch_shape, expand_shape = \
-        get_batch_features(reward_domain, all_obs_features, all_act_features)
+    expanded_s_feats, expanded_a_feats, expanded_sp_feats = \
+        get_feature_combinations(reward_domain, all_obs_features, all_act_features)
     
-    for _ in range(num_samples):
-        # Sample all rewards in one batched forward pass
-        with torch.no_grad():
-            mean, logvar = encoder.forward(batch_state_features, batch_action_features, batch_next_state_features)
-            sampled_rewards = encoder.sample(mean, logvar).squeeze(-1)  # Remove last dimension
-        
-        # Reshape to the appropriate shape based on reward domain
-        R_sampled = sampled_rewards.cpu().numpy().reshape(batch_shape)
-        
-        # Expand to (S, A, S') if needed for q_opt
-        if expand_shape is not None:
-            if reward_domain == 's':
-                # R(s) -> R(s,a,s') by broadcasting: same reward for all actions and next states
-                R_est = np.broadcast_to(R_sampled[:, None, None], expand_shape).copy()
-            elif reward_domain == 'sa':
-                # R(s,a) -> R(s,a,s') by broadcasting: same reward for all next states
-                R_est = np.broadcast_to(R_sampled[:, :, None], expand_shape).copy()
-        else:
-            # reward_domain == 'sas', no expansion needed
-            R_est = R_sampled
-    
-        # Compute optimal Q-values for the estimated reward
-        Q_est_opt = q_opt(P, R_est, gamma, max_iter=max_iter, tol=tol)
-        
-        pi_est = np.argmax(Q_est_opt, axis=1)              # (S,)
-        V_est_pi = value_under_policy(P, R_true, gamma, pi_est)
 
-        regret += float(np.mean(V_true_star - V_est_pi))
-    return regret / num_samples
+    with torch.no_grad():
+        R_est_mean, _ = encoder.forward(expanded_s_feats, expanded_a_feats, expanded_sp_feats)
+    
+    R_est_mean = to_numpy(R_est_mean).squeeze()
+
+    if reward_domain == 's':
+        R_est = np.broadcast_to(R_est_mean[:, None, None], (num_states, num_actions, num_states))
+    elif reward_domain == 'sa':
+        R_est = np.reshape(R_est_mean, (num_states, num_actions))
+        R_est = np.broadcast_to(R_est[:, :, None], (num_states, num_actions, num_states))
+    else:
+        R_est = np.reshape(R_est_mean, (num_states, num_actions, num_states))
+    
+    # Compute optimal Q-values for the estimated reward
+    Q_est_opt = q_opt(P, R_est, gamma, max_iter=max_iter, tol=tol)
+    
+    pi_est = np.argmax(Q_est_opt, axis=1)              # (S,)
+    V_est_pi = value_under_policy(P, R_true, gamma, pi_est)
+
+    regret = float(np.mean(V_true_star - V_est_pi))
+    return regret
 
 
 def evaluate_regret_non_tabular(

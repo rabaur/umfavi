@@ -58,8 +58,8 @@ def td_error_regularizer(
     # Slice rewards to match td_error shape and apply mask
     # reward_mean and reward_log_var have shape (batch_size, num_steps)
     # We need (batch_size, num_steps - 1) to match td_error
-    valid_reward_mean = reward_mean[..., :-1][valid_mask]
-    valid_reward_std = reward_std[..., :-1][valid_mask]
+    valid_reward_mean = reward_mean[..., 1:][valid_mask]
+    valid_reward_std = reward_std[..., 1:][valid_mask]
     valid_td_error = td_error[valid_mask]
     
     # Compute NLL only over valid timesteps

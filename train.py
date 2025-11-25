@@ -356,8 +356,8 @@ if __name__ == "__main__":
     parser.add_argument("--grid_size", type=int, default=10)
     parser.add_argument("--env_name", type=str, default="grid_sparse")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
-    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default="one_hot", help="Apply a transform to the observation space")
-    parser.add_argument("--act_transform", choices=["one_hot", None], default="one_hot", help="Apply a transform to the action space")
+    parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
+    parser.add_argument("--act_transform", choices=["one_hot", None], default=None, help="Apply a transform to the action space")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions (only for grid environment)")
         
     # Wandb parameters
