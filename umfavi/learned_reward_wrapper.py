@@ -51,7 +51,7 @@ class LearnedRewardWrapper(gym.Wrapper):
         next_obs_tensor = self._transform_obs(next_obs)
         
         # Compute learned reward
-        learned_r = self.reward_encoder.predict_and_sample(last_obs_tensor, action_tensor, next_obs_tensor).item()
+        learned_r = self.reward_encoder.predict_and_sample(last_obs_tensor, action_tensor, next_obs_tensor)
 
         # Store for next call
         self._last_obs = next_obs

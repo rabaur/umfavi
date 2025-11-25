@@ -156,8 +156,8 @@ class PreferenceDataset(Dataset):
         next_obs_tensor = self._to_torch(self._drop_first_t(obs))
         
         # States (from environment info dict, if available)
-        if "states" in self.data:
-            states = self.data["states"][i]
+        if SampleKey.STATES in self.data:
+            states = self.data[SampleKey.STATES][i]
             states_tensor = self._to_torch(self._drop_last_t(states))
             next_states_tensor = self._to_torch(self._drop_first_t(states))
         else:

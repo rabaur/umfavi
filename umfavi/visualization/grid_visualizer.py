@@ -6,7 +6,7 @@ from umfavi.utils.math import log_var_to_std
 from umfavi.envs.grid_env.actions import Action
 from torch.utils.data import DataLoader
 from umfavi.utils.torch import to_numpy
-from umfavi.utils.feature_transforms import get_batch_features
+from umfavi.utils.feature_transforms import get_feature_combinations
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.types import SampleKey
 
@@ -75,7 +75,7 @@ def visualize_rewards(
         raise NotImplementedError("Visualization of s,a,s' rewards is not implemented")
     
     # Construct all state-action-next_state features to compute the estimated reward matrix
-    batch_state_features, batch_action_features, batch_next_state_features, _, _ = get_batch_features(reward_domain, all_obs_features, all_act_features)
+    batch_state_features, batch_action_features, batch_next_state_features = get_feature_combinations(reward_domain, all_obs_features, all_act_features)
 
     # Predict mean and logvar
     mean, log_var = encoder(batch_state_features, batch_action_features, batch_next_state_features)

@@ -93,6 +93,9 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     
     return traj_dict
 
+def get_undiscounted_return(trajectory: TrajectoryType):
+    rewards = np.array([r for _, _, r, _, _, _ in trajectory])
+    return np.nansum(rewards)
 
 def get_discounted_return(trajectory: TrajectoryType, gamma: float):
     rewards = np.array([r for _, _, r, _, _, _ in trajectory])
