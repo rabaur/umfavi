@@ -137,20 +137,6 @@ class DemonstrationDataset(Dataset):
     def _to_torch(self, x: NDArray):
         return torch.tensor(x, dtype=torch.float32).to(self.device)
     
-    def _drop_last_t(self, x: NDArray):
-        """
-        Drops data corresponding to last time-step.
-        Assumes x has shape (..., T, F) where F is the feature dimension (may be 1).
-        """
-        return x[..., :-1, :]
-    
-    def _drop_first_t(self, x: NDArray):
-        """
-        Drops data corresponding to first time-step.
-        Assumes x has shape (..., T, F) where F is the feature dimension (may be 1).
-        """
-        return x[..., 1:, :]
-    
     def __getitem__(self, i) -> dict:
         """
         Get a single (s, a, s', a') transition sample.
