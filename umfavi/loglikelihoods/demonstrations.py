@@ -1,8 +1,6 @@
 import torch
-import torch.nn.functional as F
 from torch import nn
 from umfavi.loglikelihoods.base import BaseLogLikelihood
-from umfavi.utils.math import log_var_to_std
 from umfavi.types import SampleKey
 
 class DemonstrationsDecoder(BaseLogLikelihood):
@@ -36,26 +34,13 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         acts = kwargs[SampleKey.ACTS].long()
 
         # Get the Q-value estimates
-        q_values = kwargs["q_values"]  # (batch_size, num_steps, n_actions)
+        q_curr = kwargs["q_curr"]  # (batch_size, n_actions)
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        logits = q_values # rationality * q_values  # (batch_size, num_steps, n_actions)
+        demonstrations_nll = nn.functional.cross_entropy(q_curr, acts.squeeze(), reduction='none').mean()
 
-        # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
-        logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean()
-
-        # Compute Q-value statistics for logging
-        q_value_max = q_values.max().item()
-        q_value_min = q_values.min().item()
-        
-        metrics = {
-            "q_value_max": q_value_max,
-            "q_value_min": q_value_min,
-        }
-
-        return demonstrations_nll, metrics
+        return demonstrations_nll, {}

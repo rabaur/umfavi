@@ -339,7 +339,7 @@ if __name__ == "__main__":
     
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--num_demo_samples", type=int, default=15, help="Number of demonstration samples (0 to disable)")
     parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=19, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
@@ -357,8 +357,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
     parser.add_argument("--vis_every_n_epochs", type=int, default=10, help="Frequency of visualizations (epochs)")
-    parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64, 64, 64, 32], help="Hidden sizes for encoder MLP")
-    parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64, 64, 64, 32], help="Hidden sizes for Q-value MLP")
+    parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
+    parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)

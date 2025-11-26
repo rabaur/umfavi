@@ -53,7 +53,7 @@ def rollout(
     step = 0
     
     while not done:
-        if step and step > num_steps:
+        if num_steps and step > num_steps:
             break
         action = policy(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -63,7 +63,7 @@ def rollout(
         step += 1
     
     # Pad trajectory if it ended early
-    if pad and step < num_steps:
+    if num_steps and pad and step < num_steps:
         nan_obs = _create_nan_like(obs)
         nan_action = _create_nan_like(action)
         nan_reward = INVALID_FLOAT

@@ -49,14 +49,7 @@ class MultiFeedbackTypeModel(nn.Module):
         nll, metrics = result
 
         # Regularization
-        td_error = td_error_regularizer(
-            q_curr, 
-            kwargs[SampleKey.ACTS], 
-            kwargs["reward_mean"], 
-            kwargs["reward_log_var"], 
-            kwargs[SampleKey.GAMMA],
-            kwargs[SampleKey.DONES]
-        )
+        td_error = td_error_regularizer(**kwargs)
 
         # Create final output
         output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": td_error}

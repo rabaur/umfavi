@@ -66,6 +66,8 @@ class DemonstrationDataset(Dataset):
 
         # Datastructure of ragged arrays
         data: dict[SampleKey: list[NDArray]] = {k: [] for k in TrajKeys}
+        data[SampleKey.ACTS] = []
+        data[SampleKey.NEXT_ACTS] = []
         
         # Add one extra step to the trajectory to get the next observation
         num_steps = self.num_steps + 1 if self.num_steps else None
@@ -79,19 +81,21 @@ class DemonstrationDataset(Dataset):
 
             # Differentiate between actions and next-actions, since not returned explicitly by the environment
             acts_full = traj_demo_data[SampleKey.ACTS]
-            traj_demo_data[SampleKey.ACTS] = acts_full[:-1]
-            traj_demo_data[SampleKey.NEXT_ACTS] = acts_full[1:]
+
+            # Add dummy action for next-action
+            next_acts = np.concatenate([acts_full[:-1], np.array([-1])[:, None]], axis=0)
+            data[SampleKey.NEXT_ACTS].append(next_acts)
 
             # Append the newly generated trajectory
             for k in traj_demo_data.keys():
-                data[k].append(traj_demo_data[k])
+                data[k.value].append(traj_demo_data[k])
         
         # Initialize states and action_features as copies of observations and actions
         # (they may be transformed later)
         data[SampleKey.STATES] = data[TrajKeys.OBS]
         data[SampleKey.NEXT_STATES] = data[TrajKeys.NEXT_OBS]
-        data[SampleKey.ACT_FEATS] = data[TrajKeys.ACTS]
-        data[SampleKey.NEXT_ACT_FEATS] = data[TrajKeys.NEXT_ACTS]
+        data[SampleKey.ACT_FEATS] = data[SampleKey.ACTS]
+        data[SampleKey.NEXT_ACT_FEATS] = data[SampleKey.NEXT_ACTS]
 
         # Apply transforms if provided. Transformations are applied per observation or action.
         # TODO: Make this more efficient.
@@ -122,7 +126,7 @@ class DemonstrationDataset(Dataset):
         arrays_by_traj = zip(*data.values())
         for i, As in enumerate(arrays_by_traj):
             first_len = len(As[0])
-            assert all([len(a) == first_len for a in As]), f"Lengths of data for trajectory {i} don't match"
+            assert all([len(a) == first_len for a in As]), f"Lengths of data for trajectory {i} don't match."
             self.demo_lengths.append(first_len)
         
         # Cumulative sum for easier indexing (prepend 0 for correct offset calculation)

@@ -27,8 +27,8 @@ class SampleKey(str, Enum):
 
     # Observations (state-features).
     # Equal to states if state == observation
-    OBS = "obs"
-    NEXT_OBS = "next_obs"
+    OBS = "observations"
+    NEXT_OBS = "next_observations"
 
     # Actions
     ACTS = "actions"
