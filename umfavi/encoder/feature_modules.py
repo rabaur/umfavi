@@ -13,12 +13,6 @@ class MLPFeatureModule(nn.Module):
         reward_domain: str = 's',
         activate_last_layer: bool = True,
     ):
-        """
-        Args:
-            state_dim: The dimension of the state features.
-                Only used if `learn_embedding` is false.
-            learn_embedding: Set to true to learn embedding.
-        """
         super().__init__()
         
         self.reward_domain = reward_domain
@@ -36,7 +30,7 @@ class MLPFeatureModule(nn.Module):
         for i in range(len(hidden_sizes) - 1):
             layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
             if i < len(hidden_sizes) - 2 or activate_last_layer:
-                layers.append(nn.SiLU())
+                layers.append(nn.LeakyReLU())
         self.mlp = nn.Sequential(*layers)
         self.out_dim = hidden_sizes[-1]
     

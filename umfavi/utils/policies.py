@@ -118,7 +118,7 @@ def load_or_train_dqn(
     train_if_missing: bool = True,
     force_train: bool = False,
     gamma: float = 0.99,
-    training_timesteps: int = 100000,
+    training_timesteps: int = 100_000,
     verbose: int = 1,
     **dqn_kwargs
 ) -> sb3.DQN:
@@ -160,16 +160,16 @@ def load_or_train_dqn(
     
     # Default DQN hyperparameters (can be overridden via dqn_kwargs)
     default_kwargs = {
-        "learning_rate": 1e-3,
-        "buffer_size": 50000,
-        "learning_starts": 1000,
-        "batch_size": 32,
-        "tau": 1.0,
-        "target_update_interval": 500,
+        "learning_rate": 0.00063,
+        "buffer_size": 50_000,
+        "learning_starts": 0,
+        "batch_size": 128,
+        "target_update_interval": 250,
+        "exploration_fraction": 0.12,
+        "exploration_final_eps": 0.1,
         "train_freq": 4,
-        "gradient_steps": 1,
-        "exploration_fraction": 0.1,
-        "exploration_final_eps": 0.05,
+        "gradient_steps": -1,
+        "policy_kwargs": dict(net_arch=[256, 256])
     }
     default_kwargs.update(dqn_kwargs)
     

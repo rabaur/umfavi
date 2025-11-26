@@ -66,7 +66,7 @@ class DemonstrationDataset(Dataset):
 
             # Generate trajectory using the expert policy
             # Add one extra step to the trajectory to get the next observation
-            traj_demo = rollout(self.env, policy, n_steps=self.n_steps + 1)
+            traj_demo = rollout(self.env, policy, num_steps=self.n_steps + 1)
 
             # Extract state-action pairs from trajectory
             traj_demo_data = unpack_trajectory(traj_demo)

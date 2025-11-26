@@ -26,12 +26,13 @@ class PreferenceDecoder(BaseLogLikelihood):
         dones = kwargs[SampleKey.DONES]
         
         # Mask out invalid timesteps (where done=True) before summing
-        # Create mask: True for valid timesteps
-        valid_mask = dones.bool()  # Shape: (batch_size, 2, num_steps, 1)
+        # Create mask: True for valid timesteps (where done=False)
+        # dones is 1.0 when the episode is done, 0.0 when it's still active
+        valid_mask = (1.0 - dones)  # Shape: (batch_size, 2, num_steps, 1)
         
         # Zero out rewards at invalid timesteps
-        reward_samples[..., valid_mask] = 0.0
-        cum_rews_per_traj = reward_samples.sum(dim=-2)  # (batch_size, 2, 1)
+        masked_rewards = reward_samples * valid_mask
+        cum_rews_per_traj = masked_rewards.sum(dim=-2)  # (batch_size, 2, 1)
         cum_rews1 = cum_rews_per_traj[:, 0].squeeze()  # (batch_size,)
         cum_rews2 = cum_rews_per_traj[:, 1].squeeze()  # (batch_size,)
 

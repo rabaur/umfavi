@@ -8,6 +8,7 @@ from umfavi.utils.gym import rollout, unpack_trajectory
 from umfavi.utils.math import sigmoid
 from umfavi.utils.feature_transforms import apply_transform
 from umfavi.types import ObsType, ActType, TrajKeys, SampleKey, FeedbackType
+import matplotlib.pyplot as plt
 
 class PreferenceSample(TypedDict):
     feedback_type: str
@@ -70,13 +71,14 @@ class PreferenceDataset(Dataset):
         """
         data = {k: [] for k in TrajKeys}
         data[SampleKey.PREFERENCE] = []
+        data["cum_rews"] = []
         
-        for _ in range(self.n_samples):
+        for i in range(self.n_samples):
 
             # Generate two trajectories using imported function
             # Add one step in case next_obs (next_state) are needed
-            traj1 = rollout(self.env, policy, n_steps=self.n_steps + 1)
-            traj2 = rollout(self.env, policy, n_steps=self.n_steps + 1)
+            traj1 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=i)
+            traj2 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=i)
 
             # Extract state-action pairs
             traj1_dict = unpack_trajectory(traj1)
@@ -88,6 +90,7 @@ class PreferenceDataset(Dataset):
 
             r1 = np.nansum(rews1, dtype=np.float32)
             r2 = np.nansum(rews2, dtype=np.float32)
+            data["cum_rews"].append(np.array([r1, r2]))
 
             # Generate preference using sigmoid
             preference_prob = sigmoid(self.rationality * (r1 - r2))
