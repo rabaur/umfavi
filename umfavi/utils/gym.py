@@ -82,7 +82,7 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     traj_dict = {
         TrajKeys.OBS: [obs for obs, _, _, _, _, _ in trajectory],
         TrajKeys.ACTS: [act for _, act, _, _, _, _ in trajectory],
-        TrajKeys.REWS: [r for _, _, r, _, _, _ in trajectory],
+        TrajKeys.REWS: [rew for _, _, rew, _, _, _ in trajectory],
         TrajKeys.NEXT_OBS: [next_obs for _, _, _, next_obs, _, _ in trajectory],
         TrajKeys.DONES: [done for _, _, _, _, done, _ in trajectory]
     }

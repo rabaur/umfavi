@@ -24,8 +24,8 @@ def get_dataset(active_feedback_types, args, env, policies, device, obs_transfor
 
     if FeedbackType.DEMONSTRATION in active_feedback_types:
         demo_dataset = DemonstrationDataset(
-            n_samples=args.num_demo_samples,
-            n_steps=args.num_steps,
+            num_demonstrations=args.num_demo_samples,
+            num_steps=args.num_steps,
             env=env,
             policy=policies[FeedbackType.DEMONSTRATION],
             device=device,
