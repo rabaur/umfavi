@@ -256,10 +256,10 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=1000)
+                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100_000)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret, mean_rew = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+                regret, mean_rew = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
                 eval_metrics["eval/mean_rew"] = mean_rew
             eval_metrics["eval/regret"] = regret
 

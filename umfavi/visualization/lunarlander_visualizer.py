@@ -38,7 +38,7 @@ def visualize_lunarlander_rewards(
     
     # LunarLander-v3 observation space bounds
     x_range = (-1, 1)
-    y_range = (-0.5, 2)
+    y_range = (-0.25, 1.75)
     
     # Define sampling ranges for other dimensions
     # vx, vy, angle, angular_velocity, leg1_contact, leg2_contact
@@ -201,8 +201,8 @@ def compute_action_reward_grid(
     # Average over all dimensions except x,y (first two dimensions)
     # Shape: (resolution, resolution, n_vx, n_vy, n_angle, n_ang_vel, n_leg1, n_leg2)
     # -> (resolution, resolution)
-    reward_avg = mean_grid.mean(axis=tuple(range(2, len(original_shape))))
-    uncertainty_avg = std_grid.mean(axis=tuple(range(2, len(original_shape))))
+    reward_avg = mean_grid.max(axis=tuple(range(2, len(original_shape))))
+    uncertainty_avg = std_grid.max(axis=tuple(range(2, len(original_shape))))
     
     return reward_avg, uncertainty_avg
 
@@ -303,7 +303,7 @@ def compute_action_qvalue_grid(
     qvalue_grid = qvalue_flat.reshape(original_shape)
     
     # Average over all dimensions except x,y (first two dimensions)
-    qvalue_avg = qvalue_grid.mean(axis=tuple(range(2, len(original_shape))))
+    qvalue_avg = qvalue_grid.max(axis=tuple(range(2, len(original_shape))))
     
     return qvalue_avg
 

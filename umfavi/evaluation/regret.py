@@ -103,7 +103,7 @@ def evaluate_regret_non_tabular(
     MC estimate of the expected regret and the mean return of the estimated expert policy.
     """
     # Train a new DQN model on the wrapped environment with learned reward
-    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=10000)
+    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=100_000)
     q_model = DQNQValueModel(dqn_model)
     est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
     

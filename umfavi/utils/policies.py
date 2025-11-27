@@ -118,7 +118,7 @@ def load_or_train_dqn(
     train_if_missing: bool = True,
     force_train: bool = False,
     gamma: float = 0.99,
-    training_timesteps: int = 100_000,
+    training_timesteps: int = 200_000,
     verbose: int = 1,
     **dqn_kwargs
 ) -> sb3.DQN:

@@ -39,7 +39,7 @@ class MultiFeedbackTypeModel(nn.Module):
         # Compute Q-value estimates. Get gradients for q-value model only for demonstration feedback type.
         # Otherwise, it is not well defined.
         q_curr = self.Q_value_model(obs)
-        q_next = self.Q_value_model(obs)
+        q_next = self.Q_value_model(next_obs)
         kwargs["q_curr"] = q_curr
         kwargs["q_next"] = q_next
         

@@ -185,16 +185,19 @@ def plot_heatmap(ax, data, xrange, yrange, title, xlabel, ylabel):
         ax.plot(0, 0, 'r*', markersize=10, label='Equilibrium')
 
 def plot_trajectory_rewards(ax, fb_model, dataloader, device, num_actions=2):
-    """Plot trajectories colored by learned reward."""
-    from umfavi.types import SampleKey
+    """Plot sample state-action pairs colored by learned reward."""
+    from umfavi.types import SampleKey, FeedbackType
     
-    # Extract trajectories from dataloader - just get one batch
+    # Extract samples from dataloader - get one batch
     try:
         batch = next(iter(dataloader))
     except StopIteration:
         ax.text(0.5, 0.5, 'No data in dataloader', ha='center', va='center', transform=ax.transAxes)
         ax.axis('off')
         return
+    
+    # Check if this is preference data (has trajectory structure) or demonstration data (transitions)
+    is_preference = batch.get(SampleKey.FEEDBACK_TYPE, [None])[0] == FeedbackType.PREFERENCE
     
     # Get observations (states or obs) from batch
     if SampleKey.STATES in batch:
@@ -208,36 +211,42 @@ def plot_trajectory_rewards(ax, fb_model, dataloader, device, num_actions=2):
     
     # Convert to numpy if needed
     if isinstance(states, torch.Tensor):
-        traj = to_numpy(states)
+        states_np = to_numpy(states)
     else:
-        traj = states
+        states_np = states
     
     # Handle different batch structures:
-    # - Preference dataset: (batch_size, 2, T, state_dim) - take first batch, first of two trajectories
-    # - Demonstration dataset: (batch_size, T, state_dim) - take first batch
-    # - Already flattened: (T, state_dim) - use as is
-    if len(traj.shape) == 4:  # (batch_size, 2, time, state_dim) from preference dataset
-        traj = traj[0, 0]  # take first batch, first trajectory
-    elif len(traj.shape) == 3:  # (batch_size, time, state_dim) from demonstration dataset
-        traj = traj[0]  # take first batch
-    # else: already 2D (time, state_dim), use as is
+    if is_preference or len(states_np.shape) == 4:
+        # Preference dataset: (batch_size, 2, T, state_dim) - take first trajectory
+        states_np = states_np[0, 0]  # (T, state_dim)
+    elif len(states_np.shape) == 3:
+        # Old trajectory-based demonstrations: (batch_size, T, state_dim) - take first batch
+        states_np = states_np[0]  # (T, state_dim)
+    # else: New transition-based demonstrations: (batch_size, state_dim) - use all samples
     
-    # Now traj should be 2D: (time, state_dim)
-    if len(traj.shape) != 2:
-        ax.text(0.5, 0.5, f'Unexpected traj shape: {traj.shape}', 
+    # Now states_np is either (T, state_dim) for trajectories or (batch_size, state_dim) for transitions
+    if len(states_np.shape) != 2:
+        ax.text(0.5, 0.5, f'Unexpected state shape: {states_np.shape}', 
                 ha='center', va='center', transform=ax.transAxes)
         ax.axis('off')
         return
     
-    mean, _ = predict_rewards(fb_model, traj, device, num_actions)
+    # Predict rewards for all states
+    mean, _ = predict_rewards(fb_model, states_np, device, num_actions)
     
-    # Plot trajectory in cart_pos vs pole_angle space, colored by reward
-    scatter = ax.scatter(traj[:, 0], traj[:, 2], c=mean, s=20, cmap='viridis')
+    # Plot states in cart_pos vs pole_angle space, colored by reward
+    scatter = ax.scatter(states_np[:, 0], states_np[:, 2], c=mean, s=20, cmap='viridis', alpha=0.6)
     ax.set_xlabel('Cart Position')
     ax.set_ylabel('Pole Angle (rad)')
-    ax.set_title('Trajectory colored by learned reward')
+    
+    # Update title based on data type
+    if is_preference or states_np.shape[0] <= 32:  # Heuristic: if few points, likely a trajectory
+        ax.set_title('Sample trajectory colored by learned reward')
+    else:
+        ax.set_title('Sample state-action pairs colored by learned reward')
+    
     plt.colorbar(scatter, ax=ax, label='Reward')
-    ax.plot(0, 0, 'r*', markersize=10)
+    ax.plot(0, 0, 'r*', markersize=10, label='Goal')
 
 def plot_reward_distribution(ax, means_list, labels):
     """Plot histogram of reward values across different views."""

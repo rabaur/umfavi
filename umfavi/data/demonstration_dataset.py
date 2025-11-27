@@ -4,9 +4,10 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable, Optional
 import gymnasium as gym
-from umfavi.utils.gym import unpack_trajectory, rollout
+from umfavi.utils.gym import unpack_trajectory, rollout, get_undiscounted_return
 from umfavi.utils.feature_transforms import apply_transform
 from umfavi.types import TrajKeys, SampleKey, FeedbackType
+import matplotlib.pyplot as plt
 
 class DemonstrationDataset(Dataset):
     """
@@ -71,6 +72,7 @@ class DemonstrationDataset(Dataset):
         
         # Add one extra step to the trajectory to get the next observation
         num_steps = self.num_steps + 1 if self.num_steps else None
+        rews = []
         for i in range(self.num_demonstrations):
 
             # Generate trajectory using the expert policy
@@ -78,6 +80,9 @@ class DemonstrationDataset(Dataset):
 
             # Extract state-action pairs from trajectory
             traj_demo_data = unpack_trajectory(traj_demo)
+
+            cum_rews = get_undiscounted_return(traj_demo)
+            rews.append(cum_rews)
 
             # Differentiate between actions and next-actions, since not returned explicitly by the environment
             acts_full = traj_demo_data[SampleKey.ACTS]
@@ -89,6 +94,9 @@ class DemonstrationDataset(Dataset):
             # Append the newly generated trajectory
             for k in traj_demo_data.keys():
                 data[k.value].append(traj_demo_data[k])
+        
+        plt.hist(rews, bins=100)
+        plt.show()
         
         # Initialize states and action_features as copies of observations and actions
         # (they may be transformed later)
