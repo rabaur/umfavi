@@ -98,12 +98,15 @@ def evaluate_regret_non_tabular(
     gamma: float,
     num_samples: int = 1000,
     max_num_steps: int = 100,
-) -> tuple[float, float]:
+) -> tuple[float, float, ExpertPolicy]:
     """
     MC estimate of the expected regret and the mean return of the estimated expert policy.
+    
+    Returns:
+        tuple: (regret, mean_reward, estimated_expert_policy)
     """
     # Train a new DQN model on the wrapped environment with learned reward
-    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=100_000)
+    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=1000)
     q_model = DQNQValueModel(dqn_model)
     est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
     
@@ -124,7 +127,7 @@ def evaluate_regret_non_tabular(
         mean_rew += cum_rew
         regret += ret_expert - ret_est
     
-    return regret / num_samples, mean_rew / num_samples
+    return regret / num_samples, mean_rew / num_samples, est_expert_policy
 
     
 

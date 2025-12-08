@@ -118,7 +118,7 @@ def load_or_train_dqn(
     train_if_missing: bool = True,
     force_train: bool = False,
     gamma: float = 0.99,
-    training_timesteps: int = 200_000,
+    training_timesteps: int = 100_000,
     verbose: int = 1,
     **dqn_kwargs
 ) -> sb3.DQN:
@@ -160,7 +160,7 @@ def load_or_train_dqn(
     
     # Default DQN hyperparameters (can be overridden via dqn_kwargs)
     default_kwargs = {
-        "learning_rate": 0.00063,
+        "learning_rate": 6.3e-4,
         "buffer_size": 50_000,
         "learning_starts": 0,
         "batch_size": 128,
@@ -168,15 +168,15 @@ def load_or_train_dqn(
         "exploration_fraction": 0.12,
         "exploration_final_eps": 0.1,
         "train_freq": 4,
+        "gamma": gamma,
         "gradient_steps": -1,
         "policy_kwargs": dict(net_arch=[256, 256])
     }
-    default_kwargs.update(dqn_kwargs)
+    # default_kwargs.update(dqn_kwargs)
     
     dqn_model = sb3.DQN(
         "MlpPolicy",
         env,
-        gamma=gamma,
         verbose=verbose,
         **default_kwargs
     )

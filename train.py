@@ -26,6 +26,7 @@ from umfavi.losses import elbo_loss
 from umfavi.visualization.grid_visualizer import visualize_rewards as visualize_grid_rewards
 from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
 from umfavi.visualization.lunarlander_visualizer import visualize_lunarlander_rewards
+from umfavi.visualization.cartpole_visualizer_unfold import visualize_reward_cartpole_unfold
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.utils.feature_transforms import to_one_hot
 from umfavi.types import FeedbackType
@@ -179,6 +180,9 @@ def main(args):
         # Track losses per feedback type
         epoch_log_dict = {}
         
+        # Initialize estimated expert policy (will be set during evaluation if non-tabular)
+        est_expert_policy = None
+        
         print(f"Epoch {epoch}/{args.num_epochs-1} - Training...")
         
         for step in range(steps_per_epoch):
@@ -257,9 +261,10 @@ def main(args):
             # Compute expected regret
             if is_tabular:
                 regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100_000)
+                est_expert_policy = None  # Not available for tabular
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret, mean_rew = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
+                regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
                 eval_metrics["eval/mean_rew"] = mean_rew
             eval_metrics["eval/regret"] = regret
 
@@ -294,7 +299,11 @@ def main(args):
                         fb_model, device,
                         dataloader=sample_dataloader,
                         resolution=30,
-                        num_samples=5
+                        num_samples=5,
+                        est_expert_policy=est_expert_policy,
+                        env=env,
+                        num_trajectories=50,
+                        max_traj_steps=100
                     )
                 else:
                     # Assume gymnasium environment (CartPole, etc.)
@@ -305,9 +314,12 @@ def main(args):
                     else:
                         num_actions = env.action_space.shape[0]
                     
-                    fig = visualize_cartpole_rewards(
-                        fb_model, device, sample_dataloader,
-                        num_actions=num_actions
+                    # fig = visualize_cartpole_rewards(
+                    #     fb_model, device, sample_dataloader,
+                    #     num_actions=num_actions
+                    # )
+                    fig = visualize_reward_cartpole_unfold(
+                        env, "morton", fb_model, resolution=32
                     )
                 
                 # Log to wandb
@@ -339,15 +351,15 @@ if __name__ == "__main__":
     
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
-    parser.add_argument("--num_demo_samples", type=int, default=15, help="Number of demonstration samples (0 to disable)")
-    parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=19, help="Length of each trajectory")
+    parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
+    parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
+    parser.add_argument("--num_steps", type=int, default=None, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=5.0, help="Rationality for Bradley-Terry model")
     parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
-    parser.add_argument("--demo_rationality", type=float, default=10.0, help="Rationality for expert policy")
+    parser.add_argument("--demo_rationality", type=float, default=20.0, help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
@@ -362,7 +374,7 @@ if __name__ == "__main__":
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--env_name", type=str, default="LunarLander-v3")
+    parser.add_argument("--env_name", type=str, default="CartPole-v1")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
     parser.add_argument("--act_transform", choices=["one_hot", None], default="one_hot", help="Apply a transform to the action space")

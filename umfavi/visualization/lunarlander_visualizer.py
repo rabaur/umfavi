@@ -1,10 +1,91 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import gymnasium as gym
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
-from umfavi.utils.math import log_var_to_std
+from umfavi.utils.math import log_var_to_std, softmax
 from umfavi.utils.torch import to_numpy
-from umfavi.types import SampleKey
+from umfavi.types import SampleKey, TrajKeys
+from umfavi.utils.policies import ExpertPolicy, QValueModel
+from umfavi.utils.gym import rollout, unpack_trajectory
+
+
+class LearnedQValueModel(QValueModel):
+    """
+    Q-value model wrapper for the learned Q-value network in MultiFeedbackTypeModel.
+    """
+    
+    def __init__(self, q_net: torch.nn.Module, device: torch.device, gamma: float = 0.99):
+        """
+        Initialize learned Q-value model wrapper.
+        
+        Args:
+            q_net: The learned Q-value network (fb_model.Q_value_model)
+            device: PyTorch device
+            gamma: Discount factor
+        """
+        self.q_net = q_net
+        self.device = device
+        self._gamma = gamma
+    
+    def get_q_values(self, observation) -> np.ndarray:
+        """Get Q-values for an observation."""
+        # Handle reset return format (obs, info)
+        if isinstance(observation, tuple):
+            observation = observation[0]
+        
+        # Convert observation to tensor
+        obs_tensor = torch.tensor(observation, dtype=torch.float32, device=self.device).unsqueeze(0)
+        
+        with torch.no_grad():
+            q_values = self.q_net(obs_tensor)
+        
+        # Convert to numpy
+        return q_values.cpu().numpy().flatten()
+    
+    @property
+    def gamma(self) -> float:
+        return self._gamma
+
+
+class LearnedQExpertPolicy(ExpertPolicy):
+    """
+    Expert policy using the learned Q-value model from MultiFeedbackTypeModel.
+    """
+    
+    def __init__(self, q_model: LearnedQValueModel, rationality: float = 1.0):
+        """
+        Initialize learned Q expert policy.
+        
+        Args:
+            q_model: LearnedQValueModel for Q-value computation
+            rationality: Rationality parameter (β) for softmax policy
+        """
+        super().__init__(q_model, rationality)
+    
+    def __call__(self, observation):
+        """
+        Sample action from the expert policy using softmax over Q-values.
+        
+        Args:
+            observation: Observation from environment
+            
+        Returns:
+            Action sampled from the expert policy
+        """
+        # Get Q-values for this observation
+        q_values = self.q_model.get_q_values(observation)
+        
+        # Apply softmax with rationality parameter
+        if self.rationality != float('inf'):
+            action_probs = softmax(self.rationality * q_values, dims=0)
+            # Sample action from the distribution
+            action = np.random.choice(len(action_probs), p=action_probs)
+        else:
+            # Deterministic policy
+            action = np.argmax(q_values)
+        
+        return action
 
 
 def visualize_lunarlander_rewards(
@@ -12,7 +93,11 @@ def visualize_lunarlander_rewards(
     device: torch.device,
     dataloader=None,
     resolution=30,
-    num_samples=5
+    num_samples=5,
+    est_expert_policy: ExpertPolicy = None,
+    env: gym.Env = None,
+    num_trajectories: int = 50,
+    max_traj_steps: int = 100
 ):
     """
     Visualizes learned rewards, uncertainties, and Q-values for LunarLander-v3 environment.
@@ -21,7 +106,8 @@ def visualize_lunarlander_rewards(
     - Row 1: 4 action reward heatmaps over x,y position space
     - Row 2: 4 action uncertainty heatmaps over x,y position space
     - Row 3: 4 action Q-value heatmaps over x,y position space
-    - Row 4: Visitation distribution from dataset + empty plots
+    - Row 4: Visitation distribution + trajectories (with est_expert_policy) colored by predicted reward + 
+             trajectories (with learned Q-value policy) colored by estimated Q-value
     
     Args:
         fb_model: The multi-feedback model
@@ -29,6 +115,10 @@ def visualize_lunarlander_rewards(
         dataloader: Optional dataloader for visitation visualization
         resolution: Resolution of x,y heatmaps
         num_samples: Number of sample points per dimension for averaging
+        est_expert_policy: Optional estimated expert policy for trajectory sampling (used for reward trajectories)
+        env: Optional environment for rolling out trajectories
+        num_trajectories: Number of trajectories to sample on one plot (default: 50)
+        max_traj_steps: Maximum steps per trajectory (default: 100)
     
     Returns:
         matplotlib Figure object
@@ -128,7 +218,7 @@ def visualize_lunarlander_rewards(
         
         plt.colorbar(im_qvalue, ax=axs[action_idx + 8], fraction=0.046, pad=0.04, label='Avg Q-Value')
     
-    # Plot visitation distribution if dataloader provided (Row 4)
+    # Plot visitation distribution if dataloader provided (Row 4, first subplot)
     if dataloader is not None:
         plot_visitation_distribution(axs[12], dataloader, x_range, y_range, resolution)
     else:
@@ -136,9 +226,48 @@ def visualize_lunarlander_rewards(
                    ha='center', va='center', transform=axs[12].transAxes)
         axs[12].axis('off')
     
-    # Hide the remaining subplots in row 4
-    for i in range(13, 16):
-        axs[i].axis('off')
+    # Plot multiple trajectories colored by reward (Row 4, second subplot)
+    if est_expert_policy is not None and env is not None:
+        plot_multiple_trajectories_with_reward(
+            axs[13], 
+            fb_model, 
+            device, 
+            est_expert_policy, 
+            env,
+            x_range, 
+            y_range,
+            max_traj_steps,
+            num_trajectories=num_trajectories
+        )
+    else:
+        axs[13].text(0.5, 0.5, 'No policy/env provided', 
+                   ha='center', va='center', transform=axs[13].transAxes)
+        axs[13].axis('off')
+    
+    # Plot multiple trajectories colored by Q-value using policy derived from learned Q-value model (Row 4, third subplot)
+    if env is not None:
+        # Create expert policy from the learned Q-value model
+        learned_q_model = LearnedQValueModel(fb_model.Q_value_model, device, gamma=0.99)
+        learned_q_policy = LearnedQExpertPolicy(learned_q_model, rationality=10)
+        
+        plot_multiple_trajectories_with_qvalue(
+            axs[14], 
+            fb_model, 
+            device, 
+            learned_q_policy, 
+            env,
+            x_range, 
+            y_range,
+            max_traj_steps,
+            num_trajectories=num_trajectories
+        )
+    else:
+        axs[14].text(0.5, 0.5, 'No env provided', 
+                   ha='center', va='center', transform=axs[14].transAxes)
+        axs[14].axis('off')
+    
+    # Hide the remaining subplot in row 4
+    axs[15].axis('off')
     
     plt.tight_layout()
     return fig
@@ -408,4 +537,222 @@ def plot_visitation_distribution(ax, dataloader, x_range, y_range, resolution):
     ax.legend(loc='upper right')
     
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='log(1+count)')
+
+
+def plot_multiple_trajectories_with_reward(
+    ax, 
+    fb_model, 
+    device, 
+    policy: ExpertPolicy, 
+    env: gym.Env,
+    x_range, 
+    y_range,
+    max_steps: int = 100,
+    num_trajectories: int = 50
+):
+    """
+    Plots multiple trajectories sampled from the policy, colored by predicted reward.
+    
+    Args:
+        ax: Matplotlib axis to plot on
+        fb_model: The multi-feedback model
+        device: PyTorch device
+        policy: Policy to sample trajectory from
+        env: Environment to roll out in
+        x_range: Tuple of (min, max) for x coordinate
+        y_range: Tuple of (min, max) for y coordinate
+        max_steps: Maximum number of steps in trajectory
+        num_trajectories: Number of trajectories to sample
+    """
+    all_x_coords = []
+    all_y_coords = []
+    all_rewards = []
+    
+    # Get reward domain from feature module
+    reward_domain = fb_model.encoder.features.reward_domain
+    
+    # Sample multiple trajectories
+    for seed in range(num_trajectories):
+        # Sample a trajectory using the policy
+        trajectory = rollout(env, policy, num_steps=max_steps, seed=seed)
+        
+        # Unpack trajectory
+        trajectory_data = unpack_trajectory(trajectory)
+        
+        # Extract states from trajectory
+        states = trajectory_data[TrajKeys.OBS]  # Shape: (T, state_dim)
+        
+        # Extract x,y coordinates
+        x_coords = states[:, 0]
+        y_coords = states[:, 1]
+        
+        # Get predicted rewards for each state along the trajectory
+        states_tensor = torch.tensor(states, dtype=torch.float32, device=device)
+        
+        with torch.no_grad():
+            if reward_domain == 's':
+                # State-only reward
+                mean_rewards, _ = fb_model.encoder(states_tensor, None, None)
+            elif reward_domain == 'sa':
+                # State-action reward - use actual actions from trajectory
+                actions = trajectory_data[TrajKeys.ACTS]  # Shape: (T,)
+                n_states = states_tensor.shape[0]
+                # Create one-hot encoded actions (LunarLander has 4 discrete actions)
+                actions_onehot = torch.zeros(n_states, 4, device=device)
+                for i, action in enumerate(actions):
+                    actions_onehot[i, action] = 1.0
+                mean_rewards, _ = fb_model.encoder(states_tensor, actions_onehot, None)
+            elif reward_domain == 'sas':
+                # State-action-next_state reward
+                actions = trajectory_data[TrajKeys.ACTS]  # Shape: (T,)
+                next_states = trajectory_data[TrajKeys.NEXT_OBS]  # Shape: (T, state_dim)
+                next_states_tensor = torch.tensor(next_states, dtype=torch.float32, device=device)
+                n_states = states_tensor.shape[0]
+                # Create one-hot encoded actions
+                actions_onehot = torch.zeros(n_states, 4, device=device)
+                for i, action in enumerate(actions):
+                    actions_onehot[i, action] = 1.0
+                mean_rewards, _ = fb_model.encoder(states_tensor, actions_onehot, next_states_tensor)
+            else:
+                raise ValueError(f"Unknown reward_domain: {reward_domain}")
+        
+        predicted_rewards = to_numpy(mean_rewards.squeeze())
+        
+        # Draw trajectory line connecting the points
+        ax.plot(x_coords, y_coords, 'k-', alpha=0.1, linewidth=0.5)
+        
+        # Mark start and end points
+        if seed == 0:
+            ax.plot(x_coords[0], y_coords[0], 'bo', markersize=6, label='Start', alpha=0.6, zorder=3)
+            ax.plot(x_coords[-1], y_coords[-1], 'rs', markersize=6, label='End', alpha=0.6, zorder=3)
+        else:
+            ax.plot(x_coords[0], y_coords[0], 'bo', markersize=6, alpha=0.6, zorder=3)
+            ax.plot(x_coords[-1], y_coords[-1], 'rs', markersize=6, alpha=0.6, zorder=3)
+        
+        # Collect all coordinates and rewards
+        all_x_coords.extend(x_coords)
+        all_y_coords.extend(y_coords)
+        all_rewards.extend(predicted_rewards)
+    
+    # Create scatter plot with all points colored by predicted reward
+    scatter = ax.scatter(
+        all_x_coords, 
+        all_y_coords, 
+        c=all_rewards,
+        cmap='RdYlGn',  # Same colormap as reward heatmaps
+        s=20,
+        alpha=0.6,
+        edgecolors='none'
+    )
+    
+    # Add landing pad marker
+    ax.plot(0, 0, 'g*', markersize=20, label='Landing Pad', zorder=10)
+    
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title(f'{num_trajectories} Trajectories (colored by predicted reward)')
+    ax.legend(loc='upper right', fontsize=8)
+    ax.grid(True, alpha=0.3)
+    
+    plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04, label='Predicted Reward')
+
+
+def plot_multiple_trajectories_with_qvalue(
+    ax, 
+    fb_model, 
+    device, 
+    policy: ExpertPolicy, 
+    env: gym.Env,
+    x_range, 
+    y_range,
+    max_steps: int = None,
+    num_trajectories: int = 50
+):
+    """
+    Plots multiple trajectories sampled from an expert policy derived from the learned Q-value model,
+    colored by estimated Q-value.
+    
+    Args:
+        ax: Matplotlib axis to plot on
+        fb_model: The multi-feedback model (with Q_value_model)
+        device: PyTorch device
+        policy: Expert policy derived from fb_model.Q_value_model (LearnedQExpertPolicy)
+        env: Environment to roll out in
+        x_range: Tuple of (min, max) for x coordinate
+        y_range: Tuple of (min, max) for y coordinate
+        max_steps: Maximum number of steps in trajectory
+        num_trajectories: Number of trajectories to sample
+    """
+    all_x_coords = []
+    all_y_coords = []
+    all_qvalues = []
+    
+    # Sample multiple trajectories
+    for seed in range(num_trajectories):
+        # Sample a trajectory using the expert policy derived from Q-value model
+        trajectory = rollout(env, policy, num_steps=max_steps, seed=seed)
+        
+        # Unpack trajectory
+        trajectory_data = unpack_trajectory(trajectory)
+        
+        # Extract states from trajectory
+        states = trajectory_data[TrajKeys.OBS]  # Shape: (T, state_dim)
+        
+        # Extract x,y coordinates
+        x_coords = states[:, 0]
+        y_coords = states[:, 1]
+        
+        # Get estimated Q-values for each state along the trajectory
+        states_tensor = torch.tensor(states, dtype=torch.float32, device=device)
+        
+        with torch.no_grad():
+            # Get Q-values from the learned Q-value model
+            q_values = fb_model.Q_value_model(states_tensor)  # Shape: (T, num_actions)
+            
+            # Take max Q-value for each state (V(s) = max_a Q(s,a))
+            max_q_values = torch.max(q_values, dim=1)[0]  # Shape: (T,)
+        
+        estimated_qvalues = to_numpy(max_q_values)
+        
+        # Draw trajectory line connecting the points
+        ax.plot(x_coords, y_coords, 'k-', alpha=0.1, linewidth=0.5)
+        
+        # Mark start and end points
+        if seed == 0:
+            ax.plot(x_coords[0], y_coords[0], 'bo', markersize=6, label='Start', alpha=0.6, zorder=3)
+            ax.plot(x_coords[-1], y_coords[-1], 'rs', markersize=6, label='End', alpha=0.6, zorder=3)
+        else:
+            ax.plot(x_coords[0], y_coords[0], 'bo', markersize=6, alpha=0.6, zorder=3)
+            ax.plot(x_coords[-1], y_coords[-1], 'rs', markersize=6, alpha=0.6, zorder=3)
+        
+        # Collect all coordinates and Q-values
+        all_x_coords.extend(x_coords)
+        all_y_coords.extend(y_coords)
+        all_qvalues.extend(estimated_qvalues)
+    
+    # Create scatter plot with all points colored by estimated Q-value
+    scatter = ax.scatter(
+        all_x_coords, 
+        all_y_coords, 
+        c=all_qvalues,
+        cmap='viridis',  # Good colormap for Q-values
+        s=20,
+        alpha=0.6,
+        edgecolors='none'
+    )
+    
+    # Add landing pad marker
+    ax.plot(0, 0, 'g*', markersize=20, label='Landing Pad', zorder=10)
+    
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title(f'{num_trajectories} Trajectories from Learned Q-Policy (colored by Q-value)')
+    ax.legend(loc='upper right', fontsize=8)
+    ax.grid(True, alpha=0.3)
+    
+    plt.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04, label='Estimated Q-value')
 
