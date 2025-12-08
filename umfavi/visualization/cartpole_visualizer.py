@@ -3,11 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.math import log_var_to_std
-from umfavi.utils.torch import to_numpy
+from umfavi.utils.torch import get_model_device, to_numpy
 
-def visualize_cartpole_rewards(
+def vis_cartpole(
     fb_model: MultiFeedbackTypeModel,
-    device: torch.device,
     dataloader=None,
     resolution=50,
     num_actions=2
@@ -42,7 +41,7 @@ def visualize_cartpole_rewards(
         PA.flatten(),
         np.zeros(resolution**2)   # pole_vel = 0
     ], axis=-1)
-    
+    device = get_model_device(fb_model)
     mean_1, logvar_1 = predict_rewards(fb_model, states_1, device, num_actions)
     plot_heatmap(axs[0, 0], mean_1.reshape(resolution, resolution),
                  cart_pos_range, pole_angle_range,

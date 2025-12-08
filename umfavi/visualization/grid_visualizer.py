@@ -54,7 +54,7 @@ def visualize_state_action_dist(
     im = ax.imshow(np.log(counts + 1))
     return im
 
-def visualize_rewards(
+def vis_grid_env(
     env: GridEnv,
     encoder: RewardEncoder,
     dataloader: DataLoader,

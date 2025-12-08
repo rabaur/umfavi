@@ -23,9 +23,8 @@ from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device
 from umfavi.utils.logging import update_epoch_log_dict, console_log_batch_metrics, console_log_eval_metrics
 from umfavi.losses import elbo_loss
-from umfavi.visualization.grid_visualizer import visualize_rewards as visualize_grid_rewards
-from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
-from umfavi.visualization.lunarlander_visualizer import visualize_lunarlander_rewards
+from umfavi.visualization.grid_visualizer import vis_grid_env as visualize_grid_rewards
+from umfavi.visualization.lunarlander_visualizer import vis_lunarlander
 from umfavi.visualization.cartpole_visualizer_unfold import visualize_reward_cartpole_unfold
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.utils.feature_transforms import to_one_hot
@@ -123,7 +122,7 @@ def main(args):
 
     Q_value_model = MLPFeatureModule(
         state_dim=obs_dim,
-        action_dim=act_dim,  # Not used since reward_domain='s'
+        action_dim=None,  # Not used since reward_domain='s'
         hidden_sizes=args.q_value_hidden_sizes + [act_dim],
         reward_domain='s',  # Q-value model only acts on state features
         activate_last_layer=False  # Q-values are in R
@@ -295,7 +294,7 @@ def main(args):
                 if isinstance(env, GridEnv):
                     fig = visualize_grid_rewards(env, fb_model.encoder, sample_dataloader, all_obs_features, all_act_features)
                 elif args.env_name == "LunarLander-v3":
-                    fig = visualize_lunarlander_rewards(
+                    fig = vis_lunarlander(
                         fb_model, device,
                         dataloader=sample_dataloader,
                         resolution=30,
@@ -314,12 +313,9 @@ def main(args):
                     else:
                         num_actions = env.action_space.shape[0]
                     
-                    # fig = visualize_cartpole_rewards(
-                    #     fb_model, device, sample_dataloader,
-                    #     num_actions=num_actions
-                    # )
-                    fig = visualize_reward_cartpole_unfold(
-                        env, "morton", fb_model, resolution=32
+                    fig = visualize_cartpole_rewards(
+                        fb_model, device, sample_dataloader,
+                        num_actions=num_actions
                     )
                 
                 # Log to wandb

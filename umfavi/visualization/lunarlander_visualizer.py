@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import gymnasium as gym
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.math import log_var_to_std, softmax
-from umfavi.utils.torch import to_numpy
+from umfavi.utils.torch import get_model_device, to_numpy
 from umfavi.types import SampleKey, TrajKeys
 from umfavi.utils.policies import ExpertPolicy, QValueModel
 from umfavi.utils.gym import rollout, unpack_trajectory
@@ -88,9 +88,8 @@ class LearnedQExpertPolicy(ExpertPolicy):
         return action
 
 
-def visualize_lunarlander_rewards(
+def vis_lunarlander(
     fb_model: MultiFeedbackTypeModel,
-    device: torch.device,
     dataloader=None,
     resolution=30,
     num_samples=5,
@@ -111,7 +110,6 @@ def visualize_lunarlander_rewards(
     
     Args:
         fb_model: The multi-feedback model
-        device: PyTorch device
         dataloader: Optional dataloader for visitation visualization
         resolution: Resolution of x,y heatmaps
         num_samples: Number of sample points per dimension for averaging
@@ -145,7 +143,7 @@ def visualize_lunarlander_rewards(
     sample_points = [np.linspace(low, high, num_samples) for low, high in other_dims_ranges]
     
     action_names = ["Do Nothing", "Fire Left", "Fire Main", "Fire Right"]
-    
+    device = get_model_device(fb_model)
     for action_idx in range(4):
         # Compute average reward and uncertainty over x,y grid
         reward_grid, uncertainty_grid = compute_action_reward_grid(

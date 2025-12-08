@@ -151,3 +151,6 @@ def get_act_dim(env: gym.Env, action_transform: Callable = None) -> int:
         return 1
     else:
         raise ValueError(f"Invalid action type: {type(rand_action)}")
+
+def get_env_name(env: gym.Env):
+    return env.unwrapped.spec.id
