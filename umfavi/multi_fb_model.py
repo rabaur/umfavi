@@ -20,15 +20,10 @@ class MultiFeedbackTypeModel(nn.Module):
 
         # Encode
         obs = kwargs[SampleKey.OBS]
-        action_feats = kwargs[SampleKey.ACT_FEATS]
         next_obs = kwargs[SampleKey.NEXT_OBS]
+        action_feats = kwargs[SampleKey.ACT_FEATS]
+        next_action_feats = kwargs[SampleKey.NEXT_ACT_FEATS]
         dones = kwargs[SampleKey.DONES]
-        
-        # Replace NaN values with zeros before encoding to prevent NaN propagation
-        # These timesteps will be masked out in loss computation using the dones mask
-        obs = torch.nan_to_num(obs, nan=0.0)
-        action_feats = torch.nan_to_num(action_feats, nan=0.0)
-        next_obs = torch.nan_to_num(next_obs, nan=0.0)
         
         mean, log_var = self.encoder(obs, action_feats, next_obs)
         reward_samples = self.encoder.sample(mean, log_var)
@@ -43,8 +38,10 @@ class MultiFeedbackTypeModel(nn.Module):
 
         # Compute Q-value estimates. Get gradients for q-value model only for demonstration feedback type.
         # Otherwise, it is not well defined.
-        q_values = self.Q_value_model(obs)
-        kwargs["q_values"] = q_values
+        q_curr = self.Q_value_model(obs)
+        q_next = self.Q_value_model(next_obs)
+        kwargs["q_curr"] = q_curr
+        kwargs["q_next"] = q_next
         
         result = head(reward_samples, **kwargs)
         
@@ -52,14 +49,7 @@ class MultiFeedbackTypeModel(nn.Module):
         nll, metrics = result
 
         # Regularization
-        td_error = td_error_regularizer(
-            q_values, 
-            kwargs[SampleKey.ACTS], 
-            kwargs["reward_mean"], 
-            kwargs["reward_log_var"], 
-            kwargs[SampleKey.GAMMA],
-            kwargs[SampleKey.DONES]
-        )
+        td_error = td_error_regularizer(**kwargs)
 
         # Create final output
         output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": td_error}

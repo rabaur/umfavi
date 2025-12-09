@@ -11,3 +11,6 @@ def get_device() -> str:
 
 def to_numpy(t: torch.Tensor) -> NDArray:
     return t.detach().cpu().numpy()
+
+def get_model_device(model: torch.nn.Module):
+    return next(iter(model.parameters())).device

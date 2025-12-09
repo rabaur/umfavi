@@ -13,7 +13,7 @@ from umfavi.utils.policies import (
 from umfavi.envs.env_types import TabularEnv
 from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.utils.feature_transforms import get_feature_combinations
-from umfavi.utils.gym import rollout, get_discounted_return
+from umfavi.utils.gym import rollout, get_discounted_return, get_undiscounted_return
 from umfavi.utils.torch import to_numpy
 
 
@@ -98,12 +98,15 @@ def evaluate_regret_non_tabular(
     gamma: float,
     num_samples: int = 1000,
     max_num_steps: int = 100,
-) -> tuple[float, float]:
+) -> tuple[float, float, ExpertPolicy]:
     """
     MC estimate of the expected regret and the mean return of the estimated expert policy.
+    
+    Returns:
+        tuple: (regret, mean_reward, estimated_expert_policy)
     """
     # Train a new DQN model on the wrapped environment with learned reward
-    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=10000)
+    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=1000)
     q_model = DQNQValueModel(dqn_model)
     est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
     
@@ -114,16 +117,17 @@ def evaluate_regret_non_tabular(
         seed = i  # Use iteration index as seed for reproducibility
         
         # Rollout true expert policy
-        traj_expert = rollout(base_env, true_expert_policy, n_steps=max_num_steps, seed=seed)
+        traj_expert = rollout(base_env, true_expert_policy, num_steps=max_num_steps, seed=seed)
         ret_expert = get_discounted_return(traj_expert, gamma)
         
         # Rollout estimated expert policy from the same initial state
-        traj_est = rollout(base_env, est_expert_policy, n_steps=max_num_steps, seed=seed)
+        traj_est = rollout(base_env, est_expert_policy, num_steps=max_num_steps, seed=seed)
         ret_est = get_discounted_return(traj_est, gamma)
-        mean_rew += ret_est
+        cum_rew = get_undiscounted_return(traj_est)
+        mean_rew += cum_rew
         regret += ret_expert - ret_est
     
-    return regret / num_samples, mean_rew / num_samples
+    return regret / num_samples, mean_rew / num_samples, est_expert_policy
 
     
 

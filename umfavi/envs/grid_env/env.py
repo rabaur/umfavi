@@ -65,6 +65,11 @@ def validate_kwargs(kwargs):
     assert "p_rand" in kwargs, "p_rand must be provided"
     assert kwargs["grid_size"] > 0, "grid_size must be positive"
     assert 0 <= kwargs["p_rand"] <= 1, "p_rand must be in [0, 1]"
+    if "goal_state" in kwargs:
+        goal = kwargs["goal_state"]
+        grid_size = kwargs["grid_size"]
+        assert isinstance(goal, tuple) and len(goal) == 2, "goal_state must be a tuple of (i, j)"
+        assert 0 <= goal[0] < grid_size and 0 <= goal[1] < grid_size, "goal_state must be within grid bounds"
 
 class GridEnv(TabularEnv):
     metadata = {"render_modes": ["human"]}
@@ -77,6 +82,7 @@ class GridEnv(TabularEnv):
             grid_size (int): The number of grid points in each dimension.
             reward_type (str): The type of ground truth reward function. Options are: "sparse", "dense", "path", "cliff", "five_goals".
             p_rand (float): The probability of transitioning to a random state. Must be in [0, 1].
+            goal_state (tuple, optional): The goal state as (i, j) coordinates. If not provided, defaults to bottom-right corner (grid_size-1, grid_size-1).
             **kwargs: Additional arguments for `construct_grid_env`.
         """
         super().__init__()
@@ -84,6 +90,10 @@ class GridEnv(TabularEnv):
         self.grid_size = kwargs["grid_size"]
         self.reward_type = kwargs["reward_type"]
         self.p_rand = kwargs["p_rand"]
+        
+        # Set goal state (default to bottom-right corner)
+        self.goal_state = kwargs.get("goal_state", (self.grid_size - 1, self.grid_size - 1))
+        
         self._P, self._R = construct_grid_env(**kwargs)
     
         # Action space
@@ -108,11 +118,15 @@ class GridEnv(TabularEnv):
         # update (i,j) deterministically or with randomness
         i, j = self.state_coord
         prev_state_idx = self.state_idx
+        
+        # Check if we're starting from the goal state
+        terminated = (self.state_coord == self.goal_state)
+        
         i2, j2 = succ_state(i, j, Action(action), self.grid_size)
         self.state_coord = (i2, j2)
         self.state_idx = to_flat_idx(i2, j2, self.grid_size)
         reward = self._R[prev_state_idx, action, self.state_idx]
-        terminated = False
+        
         truncated = False
         return self.state_idx, reward, terminated, truncated, {}
 

@@ -23,8 +23,9 @@ from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device
 from umfavi.utils.logging import update_epoch_log_dict, console_log_batch_metrics, console_log_eval_metrics
 from umfavi.losses import elbo_loss
-from umfavi.visualization.grid_visualizer import visualize_rewards as visualize_grid_rewards
-from umfavi.visualization.cartpole_visualizer import visualize_cartpole_rewards
+from umfavi.visualization.grid_visualizer import vis_grid_env as visualize_grid_rewards
+from umfavi.visualization.lunarlander_visualizer import vis_lunarlander
+from umfavi.visualization.cartpole_visualizer_unfold import visualize_reward_cartpole_unfold
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.utils.feature_transforms import to_one_hot
 from umfavi.types import FeedbackType
@@ -136,7 +137,7 @@ def main(args):
 
     Q_value_model = MLPFeatureModule(
         state_dim=obs_dim,
-        action_dim=act_dim,  # Not used since reward_domain='s'
+        action_dim=None,  # Not used since reward_domain='s'
         hidden_sizes=args.q_value_hidden_sizes + [act_dim],
         reward_domain='s',  # Q-value model only acts on state features
         activate_last_layer=False  # Q-values are in R
@@ -192,6 +193,9 @@ def main(args):
         
         # Track losses per feedback type
         epoch_log_dict = {}
+        
+        # Initialize estimated expert policy (will be set during evaluation if non-tabular)
+        est_expert_policy = None
         
         print(f"Epoch {epoch}/{args.num_epochs-1} - Training...")
         
@@ -270,10 +274,11 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=1000)
+                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100_000)
+                est_expert_policy = None  # Not available for tabular
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret, mean_rew = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma)
+                regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
                 eval_metrics["eval/mean_rew"] = mean_rew
             eval_metrics["eval/regret"] = regret
 
@@ -303,6 +308,17 @@ def main(args):
                 # Use appropriate visualizer based on environment type
                 if isinstance(env, GridEnv):
                     fig = visualize_grid_rewards(env, fb_model.encoder, sample_dataloader, all_obs_features, all_act_features)
+                elif args.env_name == "LunarLander-v3":
+                    fig = vis_lunarlander(
+                        fb_model, device,
+                        dataloader=sample_dataloader,
+                        resolution=30,
+                        num_samples=5,
+                        est_expert_policy=est_expert_policy,
+                        env=env,
+                        num_trajectories=50,
+                        max_traj_steps=100
+                    )
                 else:
                     # Assume gymnasium environment (CartPole, etc.)
                     # Get number of actions for the environment
@@ -350,32 +366,32 @@ if __name__ == "__main__":
     # Dataset parameters
     parser.add_argument("--num_pref_samples", type=int, default=0, help="Number of preference samples (0 to disable)")
     parser.add_argument("--num_demo_samples", type=int, default=2, help="Number of demonstration samples (0 to disable)")
-    parser.add_argument("--reward_domain", type=str, default="sa", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
-    parser.add_argument("--num_steps", type=int, default=19, help="Length of each trajectory")
+    parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
+    parser.add_argument("--num_steps", type=int, default=None, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
     
     # Policy parameters
-    parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
-    parser.add_argument("--pref_trajectory_rationality", type=float, default=10.0, help="Rationality of the expert policy generating the comparison trajectories")
+    parser.add_argument("--pref_rationality", type=float, default=5.0, help="Rationality for Bradley-Terry model")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
     parser.add_argument("--demo_rationality", type=float, default=20.0, help="Rationality for expert policy")
-    parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
     parser.add_argument("--eval_every_n_epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
-    parser.add_argument("--vis_every_n_epochs", type=int, default=25, help="Frequency of visualizations (epochs)")
+    parser.add_argument("--vis_every_n_epochs", type=int, default=10, help="Frequency of visualizations (epochs)")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--env_name", type=str, default="grid_sparse")
+    parser.add_argument("--env_name", type=str, default="CartPole-v1")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
-    parser.add_argument("--act_transform", choices=["one_hot", None], default=None, help="Apply a transform to the action space")
+    parser.add_argument("--act_transform", choices=["one_hot", None], default="one_hot", help="Apply a transform to the action space")
     parser.add_argument("--n_dct_basis_fns", type=int, default=8, help="Number of DCT basis functions (only for grid environment)")
         
     # Wandb parameters

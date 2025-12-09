@@ -13,12 +13,6 @@ class MLPFeatureModule(nn.Module):
         reward_domain: str = 's',
         activate_last_layer: bool = True,
     ):
-        """
-        Args:
-            state_dim: The dimension of the state features.
-                Only used if `learn_embedding` is false.
-            learn_embedding: Set to true to learn embedding.
-        """
         super().__init__()
         
         self.reward_domain = reward_domain

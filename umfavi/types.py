@@ -20,12 +20,24 @@ class TrajKeys(str, Enum):
 class SampleKey(str, Enum):
     """Keys for dataset sample dictionaries returned by Dataset.__getitem__()."""
     FEEDBACK_TYPE = "feedback_type"
+
+    # States
     STATES = "states"
     NEXT_STATES = "next_states"
-    OBS = "obs"
-    NEXT_OBS = "next_obs"
+
+    # Observations (state-features).
+    # Equal to states if state == observation
+    OBS = "observations"
+    NEXT_OBS = "next_observations"
+
+    # Actions
     ACTS = "actions"
+    NEXT_ACTS = "next_actions"
+
+    # Action features (action features are to actions like observations to states)
+    # Equal to acts if actions == action features
     ACT_FEATS = "action_features"
+    NEXT_ACT_FEATS = "next_action_features"
     DONES = "dones"
     TARGETS = "targets"
     RATIONALITY = "rationality"

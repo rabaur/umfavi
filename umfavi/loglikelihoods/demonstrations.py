@@ -1,8 +1,6 @@
 import torch
-import torch.nn.functional as F
 from torch import nn
 from umfavi.loglikelihoods.base import BaseLogLikelihood
-from umfavi.utils.math import log_var_to_std
 from umfavi.types import SampleKey
 
 class DemonstrationsDecoder(BaseLogLikelihood):
@@ -16,42 +14,37 @@ class DemonstrationsDecoder(BaseLogLikelihood):
 
     def forward(self, reward_samples: torch.Tensor, **kwargs) -> torch.Tensor:
         """
-        The likelihood of the AVRIL demonstrations has two terms:
-        - The likelihood of the demonstrations under the Boltzmann-rational expert policy:
-            ∑_{s, a} log π(a | s) = ∑_{s, a} log (exp(βQ(s, a)) / ∑_{a'} exp(βQ(s, a')))
+        Computes the likelihood of demonstrations under a Boltzmann-rational policy.
+        
+        For transition-level data, each sample is a single (s, a) pair.
+        The model predicts: π(a | s) ∝ exp(Q(s, a))
+        
         Args:
-            reward_samples: Float tensor of shape (batch_size, num_steps).
+            reward_samples: Float tensor of shape (batch_size,) or (batch_size, 1)
             **kwargs: Additional arguments including:
-                - obs: Float tensor of shape (batch_size, num_steps, obs_dim).
-                - acts: Float tensor of shape (batch_size, num_steps, act_dim).
-                - reward_mean: Float tensor of shape (batch_size, num_steps) - mean of reward distribution.
-                - reward_log_var: Float tensor of shape (batch_size, num_steps) - log variance of reward distribution.
-                - rationality: Rationality coefficient (default: 1.0).
-                - gamma: Discount factor (default: 0.99).
-                - td_error_weight: Weight for the TD-error constraint (default: 1.0).
+                - q_curr: Q-values tensor of shape (batch_size, n_actions)
+                - acts: Actions tensor of shape (batch_size, 1) with long/int dtype
+        
         Returns:
-            ...
+            Tuple of (nll, metrics_dict)
         """
         # Extract parameters from kwargs
-        acts = kwargs[SampleKey.ACTS].long()
+        acts = kwargs[SampleKey.ACTS].long().squeeze(-1)  # (batch_size,)
 
         # Get the Q-value estimates
-        q_values = kwargs["q_values"]  # (batch_size, num_steps, n_actions)
+        q_curr = kwargs["q_curr"]  # (batch_size, n_actions)
 
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
         # ------------------------------------------------------------------------------------------------
 
         # Compute the log-likelihood of the demonstrations under the Boltzmann-rational expert policy
-        logits = q_values # rationality * q_values  # (batch_size, num_steps, n_actions)
-
-        # Shuffle logits to (batch_size, n_actions, num_steps) since expects (N, C, d1, d2, ...) shape
-        logits = logits.permute(0, 2, 1)
-        demonstrations_nll = nn.functional.cross_entropy(logits, acts.squeeze(), reduction='none').mean()
+        # cross_entropy expects: (N, C) for input and (N,) for target
+        demonstrations_nll = nn.functional.cross_entropy(q_curr, acts, reduction='mean')
 
         # Compute Q-value statistics for logging
-        q_value_max = q_values.max().item()
-        q_value_min = q_values.min().item()
+        q_value_max = q_curr.max().item()
+        q_value_min = q_curr.min().item()
         
         metrics = {
             "q_value_max": q_value_max,

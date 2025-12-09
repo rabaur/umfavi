@@ -1,12 +1,12 @@
 import gymnasium as gym
-from gymnasium import spaces
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 import numpy as np
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.types import TrajectoryType, TrajKeys
 
 INVALID_FLOAT = np.float32(np.nan)
 INVALID_INT = -1
+
 
 def _create_nan_like(value):
     """Create a NaN version of the given value, preserving structure."""
@@ -23,14 +23,21 @@ def _create_nan_like(value):
         # For other types, return np.nan as fallback
         return INVALID_FLOAT
 
-def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True, seed: int = None) -> TrajectoryType:
+
+def rollout(
+    env: gym.Env,
+    policy: Callable,
+    num_steps: Optional[int] = None,
+    pad: bool = True,
+    seed: int = None
+) -> TrajectoryType:
     """
     Rollout a policy in an environment for n_steps.
     
     Args:
         env: The environment
         policy: Policy function that maps observations to actions
-        n_steps: Number of steps to rollout
+        num_steps: Number of steps to rollout. If None, rollout until receives "done" from environment.
         pad: If True, pad trajectory to n_steps with NaN values if episode ends early
         seed: Optional seed for environment reset
     
@@ -45,7 +52,9 @@ def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True, seed
     done = False
     step = 0
     
-    while not done and step < n_steps:
+    while not done:
+        if num_steps and step > num_steps:
+            break
         action = policy(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
@@ -54,16 +63,17 @@ def rollout(env: gym.Env, policy: Callable, n_steps: int, pad: bool = True, seed
         step += 1
     
     # Pad trajectory if it ended early
-    if pad and step < n_steps:
+    if num_steps and pad and step < num_steps:
         nan_obs = _create_nan_like(obs)
         nan_action = _create_nan_like(action)
         nan_reward = INVALID_FLOAT
         nan_info = {}
         
-        for _ in range(n_steps - step):
+        for _ in range(num_steps - step):
             ep.append((nan_obs, nan_action, nan_reward, nan_obs, True, nan_info))
     
     return ep
+
 
 def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     """
@@ -72,7 +82,7 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     traj_dict = {
         TrajKeys.OBS: [obs for obs, _, _, _, _, _ in trajectory],
         TrajKeys.ACTS: [act for _, act, _, _, _, _ in trajectory],
-        TrajKeys.REWS: [r for _, _, r, _, _, _ in trajectory],
+        TrajKeys.REWS: [rew for _, _, rew, _, _, _ in trajectory],
         TrajKeys.NEXT_OBS: [next_obs for _, _, _, next_obs, _, _ in trajectory],
         TrajKeys.DONES: [done for _, _, _, _, done, _ in trajectory]
     }
@@ -93,9 +103,11 @@ def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
     
     return traj_dict
 
+
 def get_undiscounted_return(trajectory: TrajectoryType):
     rewards = np.array([r for _, _, r, _, _, _ in trajectory])
     return np.nansum(rewards)
+
 
 def get_discounted_return(trajectory: TrajectoryType, gamma: float):
     rewards = np.array([r for _, _, r, _, _, _ in trajectory])
@@ -125,6 +137,7 @@ def get_obs_dim(env: gym.Env, observation_transform: Callable = None) -> int:
     else:
         raise ValueError(f"Invalid observation type: {type(rand_obs)}")
 
+
 def get_act_dim(env: gym.Env, action_transform: Callable = None) -> int:
     """
     Get the dimensionality of the action representation by sampling a random action and applying the action-transform.
@@ -138,3 +151,6 @@ def get_act_dim(env: gym.Env, action_transform: Callable = None) -> int:
         return 1
     else:
         raise ValueError(f"Invalid action type: {type(rand_action)}")
+
+def get_env_name(env: gym.Env):
+    return env.unwrapped.spec.id
