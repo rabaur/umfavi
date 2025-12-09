@@ -59,10 +59,11 @@ def main(args):
 
         gym_env = gym.make(args.env_name)
         env = MiniGridWrapper(gym_env)
+        print("SJDFJSHKDFHS", env.observation_space)
     else:
         raise ValueError(f"Unsupported environment name: {args.env_name}")
     
-    env = get_env(**vars(args))
+        env = get_env(**vars(args))
 
     device = get_device()
 
@@ -388,7 +389,6 @@ if __name__ == "__main__":
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)
-    parser.add_argument("--env_name", type=str, default="CartPole-v1")
     parser.add_argument("--p_rand", type=float, default=0.0, help="Randomness in transitions (0 for deterministic)")
     parser.add_argument("--obs_transform", choices=["one_hot", "continuous_coordinate", "dct", None], default=None, help="Apply a transform to the observation space")
     parser.add_argument("--act_transform", choices=["one_hot", None], default="one_hot", help="Apply a transform to the action space")

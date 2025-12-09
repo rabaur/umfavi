@@ -173,6 +173,10 @@ def load_or_train_dqn(
         "policy_kwargs": dict(net_arch=[256, 256])
     }
     # default_kwargs.update(dqn_kwargs)
+
+    from stable_baselines3.common.vec_env.util import dict_to_obs, obs_space_info
+    print("DQN ENV", env.observation_space)
+    print("DQN ENV DEUX", obs_space_info(env.observation_space))
     
     dqn_model = sb3.DQN(
         "MlpPolicy",

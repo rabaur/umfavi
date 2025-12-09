@@ -14,6 +14,8 @@ setup(
         "gymnasium",  # or gym, depending on your usage
         "wandb",
         "matplotlib",
+        "vsup",
+        "numpy-hilbert-curve"
     ],
     extras_require={
         "dev": [

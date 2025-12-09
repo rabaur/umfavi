@@ -5,7 +5,7 @@ from gymnasium import spaces
 import numpy as np
 
 # MiniGrid is an optional dependency; the wrapper is only used when it is installed.
-from minigrid.wrappers import FullyObsWrapper, SymbolicObsWrapper, ReseedWrapper
+from minigrid.wrappers import FullyObsWrapper, SymbolicObsWrapper, ReseedWrapper, FlatObsWrapper
 
 from umfavi.envs.grid_env.action_features import action_feature_factory
 
@@ -36,6 +36,7 @@ class MiniGridWrapper(gym.Env):
         env = ReseedWrapper(env, seeds=seeds or [0], seed_idx=0)
         env = FullyObsWrapper(env)
         env = SymbolicObsWrapper(env)
+        env = FlatObsWrapper(env)
         self.env = env
 
         self.action_space = self.env.action_space
@@ -52,7 +53,7 @@ class MiniGridWrapper(gym.Env):
             [self.grid_size - 1, self.grid_size - 1] if self.grid_size else [np.iinfo(np.int32).max] * 2,
             dtype=np.int32,
         )
-        self.observation_space = spaces.Dict(
+        '''self.observation_space = spaces.Dict(
             {
                 "state": spaces.Box(
                     low=np.zeros(2, dtype=np.int32),
@@ -67,7 +68,8 @@ class MiniGridWrapper(gym.Env):
                     shape=sample_feats.shape,
                 ),
             }
-        )
+        )'''
+        self.observation_space = self.env.observation_space  # --- IGNORE ---
 
         # Build tabular model over reachable states for expert policy/regret
         self._build_tabular_model(sample_obs=sample_obs, sample_feats=sample_feats, max_states=max_states)
@@ -219,13 +221,13 @@ class MiniGridWrapper(gym.Env):
 
     def reset(self, seed=None, options=None):
         obs, info = self.env.reset(seed=seed, options=options)
-        wrapped_obs = self._wrap_obs(obs)
-        return wrapped_obs, info
+        #wrapped_obs = self._wrap_obs(obs)
+        return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        wrapped_obs = self._wrap_obs(obs)
-        return wrapped_obs, reward, terminated, truncated, info
+        # wrapped_obs = self._wrap_obs(obs)
+        return obs, reward, terminated, truncated, info
 
     def render(self, mode="human"):
         return self.env.render()
