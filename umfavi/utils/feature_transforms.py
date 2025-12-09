@@ -1,12 +1,30 @@
 import numpy as np
 import torch
+import gymnasium as gym
 from typing import Callable
-
 
 def to_one_hot(discr_x: int, n: int) -> np.ndarray:
     one_hot = np.zeros(n, dtype=np.float32)
     one_hot[discr_x] = 1
     return one_hot
+
+def get_action_transform(args, env: gym.Env) -> Callable:
+    act_transform = None
+    if args.act_transform:
+        if args.act_transform == "one_hot":
+            act_transform = lambda x: to_one_hot(x, env.action_space.n)
+        else:
+            raise NotImplementedError(f"Invalid action transform: {args.act_transform}")
+    return act_transform
+
+def get_observation_transform(args, env: gym.Env) -> Callable:
+    obs_transform = None
+    if args.obs_transform:
+        if args.obs_transform == "one_hot":
+            obs_transform = lambda x: to_one_hot(x, env.observation_space.n)
+        else:
+            raise NotImplementedError(f"Invalid observation transform: {args.obs_transform}")
+    return obs_transform
 
 def apply_transform(transform: Callable, x: np.ndarray) -> np.ndarray:
     """

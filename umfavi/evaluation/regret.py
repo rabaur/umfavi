@@ -7,7 +7,6 @@ from umfavi.utils.tabular import q_opt
 from umfavi.utils.policies import (
     ExpertPolicy, 
     create_expert_policy,
-    load_or_train_dqn,
     DQNQValueModel
 )
 from umfavi.envs.env_types import TabularEnv

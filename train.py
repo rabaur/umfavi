@@ -2,6 +2,7 @@ import argparse
 import torch
 import wandb
 import matplotlib.pyplot as plt
+import stable_baselines3 as sb3
 from umfavi.envs.get_env import get_env
 from umfavi.data.get_dataset import get_dataset
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
@@ -11,7 +12,6 @@ from umfavi.evaluation.val_loss import compute_eval_loss
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import (
     create_expert_policy,
-    load_or_train_dqn,
     DQNQValueModel,
     TabularQValueModel
 )
@@ -24,10 +24,17 @@ from umfavi.utils.torch import get_device
 from umfavi.utils.logging import update_epoch_log_dict, console_log_batch_metrics, console_log_eval_metrics
 from umfavi.losses import elbo_loss
 from umfavi.visualization.get_visualization import get_visualization
-from umfavi.utils.feature_transforms import to_one_hot
+from umfavi.utils.feature_transforms import get_action_transform, get_observation_transform
 from umfavi.types import FeedbackType
 from umfavi.envs.env_types import TabularEnv
 from umfavi.utils.training import get_batch
+
+
+def get_q_model(env, args):
+    if isinstance(env, TabularEnv):
+        return TabularQValueModel(env, gamma=args.gamma)
+    else:
+        return DQNQValueModel(sb3.DQN.load(args.expert_policy_path, device=get_device()))
 
 def main(args):
 
@@ -59,41 +66,22 @@ def main(args):
         raise ValueError("At least one feedback type must have samples > 0")
     
     # Create Q-value model (shared across all policies)
-    is_tabular = isinstance(env, TabularEnv)
-    if is_tabular:
-        q_model = TabularQValueModel(env, gamma=args.gamma)
-    else:
-        dqn_model = load_or_train_dqn(env, gamma=args.gamma, train_if_missing=True)
-        q_model = DQNQValueModel(dqn_model)
+    q_model = get_q_model(env, args)
     
     # Create policies (all sharing the same Q-value model)
     policies = {}
     policies[FeedbackType.PREFERENCE] = create_expert_policy(
-        env=env, 
+        q_model=q_model,
         rationality=args.pref_trajectory_rationality, 
-        q_model=q_model
     )
     policies[FeedbackType.DEMONSTRATION] = create_expert_policy(
-        env=env, 
+        q_model=q_model,
         rationality=args.demo_rationality, 
-        q_model=q_model
     )
     
-    # Define action-transform
-    act_transform = None
-    if args.act_transform:
-        if args.act_transform == "one_hot":
-            act_transform = lambda x: to_one_hot(x, env.action_space.n)
-        else:
-            raise NotImplementedError(f"Invalid action transform: {args.act_transform}")
-    
-    # Define observation-transform
-    obs_transform = None
-    if args.obs_transform:
-        if args.obs_transform == "one_hot":
-            obs_transform = lambda x: to_one_hot(x, env.observation_space.n)
-        else:
-            raise NotImplementedError(f"Invalid observation transform: {args.obs_transform}")
+    # Define action and observation transforms
+    act_transform = get_action_transform(args, env)
+    obs_transform = get_observation_transform(args, env)
 
     # Dimensionality of the observation and action-space
     obs_dim = get_obs_dim(env, obs_transform)
@@ -102,7 +90,6 @@ def main(args):
     # Create datasets and dataloaders
     _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
     _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
-
 
     feature_module = MLPFeatureModule(
         obs_dim,
@@ -157,7 +144,7 @@ def main(args):
     print(f"Starting training for {args.num_epochs} epochs")
     print(f"{'='*60}\n")
 
-    regret_reference_policy = create_expert_policy(env, rationality=float("inf"), q_model=q_model)
+    optimal_policy = create_expert_policy(q_model=q_model, rationality=float("inf"))
 
     for epoch in range(args.num_epochs):
         
@@ -250,7 +237,7 @@ def main(args):
                 regret = evaluate_regret_tabular(env, reward_encoder, gamma=args.gamma, num_samples=100_000)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
+                regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(optimal_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
                 eval_metrics["eval/mean_rew"] = mean_rew
             eval_metrics["eval/regret"] = regret
 
@@ -309,6 +296,7 @@ if __name__ == "__main__":
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=None, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
+    parser.add_argument("--expert_policy_path", type=str, default=None, help="Path to expert policy")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=5.0, help="Rationality for Bradley-Terry model")
