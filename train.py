@@ -23,15 +23,10 @@ from umfavi.utils.reproducibility import seed_everything
 from umfavi.utils.torch import get_device
 from umfavi.utils.logging import update_epoch_log_dict, console_log_batch_metrics, console_log_eval_metrics
 from umfavi.losses import elbo_loss
-from umfavi.visualization.grid_visualizer import vis_grid_env as visualize_grid_rewards
-from umfavi.visualization.lunarlander_visualizer import vis_lunarlander
-from umfavi.visualization.cartpole_visualizer_unfold import visualize_reward_cartpole_unfold
-from umfavi.envs.grid_env.env import GridEnv
+from umfavi.visualization.get_visualization import get_visualization
 from umfavi.utils.feature_transforms import to_one_hot
 from umfavi.types import FeedbackType
 from umfavi.envs.env_types import TabularEnv
-from umfavi.utils.feature_transforms import apply_transform
-import numpy as np
 from umfavi.utils.training import get_batch
 
 def main(args):
@@ -164,13 +159,6 @@ def main(args):
 
     regret_reference_policy = create_expert_policy(env, rationality=float("inf"), q_model=q_model)
 
-    # If the environment is tabular, pre-compute all state-action features
-    all_obs_features = None
-    all_act_features = None
-    if is_tabular:
-        all_obs_features = torch.tensor(apply_transform(obs_transform, np.arange(env.observation_space.n)[:, None])).to(device)
-        all_act_features = torch.tensor(apply_transform(act_transform, np.arange(env.action_space.n)[:, None])).to(device)
-
     for epoch in range(args.num_epochs):
         
         # Training
@@ -259,8 +247,7 @@ def main(args):
             
             # Compute expected regret
             if is_tabular:
-                regret = evaluate_regret_tabular(env, reward_encoder, all_obs_features, all_act_features, gamma=args.gamma, num_samples=100_000)
-                est_expert_policy = None  # Not available for tabular
+                regret = evaluate_regret_tabular(env, reward_encoder, gamma=args.gamma, num_samples=100_000)
             else:
                 wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
                 regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(regret_reference_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
@@ -286,37 +273,10 @@ def main(args):
         if epoch % args.vis_every_n_epochs == 0:
             print(f"  Generating visualization...")
             fb_model.eval()
+
             with torch.no_grad():
-                # Get first available dataloader for trajectory visualization
-                sample_dataloader = next(iter(train_dataloaders.values()))
                 
-                # Use appropriate visualizer based on environment type
-                if isinstance(env, GridEnv):
-                    fig = visualize_grid_rewards(env, fb_model.encoder, sample_dataloader, all_obs_features, all_act_features)
-                elif args.env_name == "LunarLander-v3":
-                    fig = vis_lunarlander(
-                        fb_model, device,
-                        dataloader=sample_dataloader,
-                        resolution=30,
-                        num_samples=5,
-                        est_expert_policy=est_expert_policy,
-                        env=env,
-                        num_trajectories=50,
-                        max_traj_steps=100
-                    )
-                else:
-                    # Assume gymnasium environment (CartPole, etc.)
-                    # Get number of actions for the environment
-                    from gymnasium import spaces
-                    if isinstance(env.action_space, spaces.Discrete):
-                        num_actions = env.action_space.n
-                    else:
-                        num_actions = env.action_space.shape[0]
-                    
-                    fig = visualize_cartpole_rewards(
-                        fb_model, device, sample_dataloader,
-                        num_actions=num_actions
-                    )
+                fig = get_visualization(env, fb_model)
                 
                 # Log to wandb
                 if args.log_wandb:
@@ -337,8 +297,6 @@ def main(args):
     if args.log_wandb:
         wandb.finish()
         
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 

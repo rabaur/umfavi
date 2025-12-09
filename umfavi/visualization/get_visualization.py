@@ -11,27 +11,18 @@ from umfavi.utils.gym import get_env_name
 
 def get_visualization(
     env: gym.Env,
-    fb_model: MultiFeedbackTypeModel,
-    dataloader: DataLoader,
-    all_obs_features: NDArray,
-    all_state_features: NDArray,
-    est_expert_policy: ExpertPolicy
+    fb_model: MultiFeedbackTypeModel
 ):
     if isinstance(env, GridEnv):
-        fig = vis_grid_env(env, fb_model, all_obs_features, all_state_features)
+        fig = vis_grid_env(
+            env,
+            fb_model
+        )
     elif get_env_name(env) == "LunarLander-v3":
         fig = vis_lunarlander(
-            fb_model,
-            dataloader=dataloader,
-            resolution=30,
-            num_samples=5,
-            est_expert_policy=est_expert_policy,
             env=env,
-            num_trajectories=50,
-            max_traj_steps=100
+            fb_model=fb_model,
         )
-    elif get_env_name(env) == "CartPole-v1":
-        fig = vis_cartpole(
-            fb_model,
-
-        )
+    else: 
+        raise NotImplementedError(f"Visualization for environment {get_env_name(env)} not implemented")
+    return fig

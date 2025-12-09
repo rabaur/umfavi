@@ -22,7 +22,7 @@ def vis_lunarlander(
     other_feats = np.full((num_data, 4), 0.0)
     all_feats = np.concatenate([xys_flat, other_feats], axis=1)
     model_device = get_model_device(fb_model)
-    all_feats_torch = torch.tensor(all_feats, device=model_device)
+    all_feats_torch = torch.tensor(all_feats, device=model_device, dtype=torch.float32)
 
     # Predict Q-values
     est_q_vals = np.empty((num_data, 4))
