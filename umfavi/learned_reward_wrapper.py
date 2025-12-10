@@ -36,12 +36,12 @@ class LearnedRewardWrapper(gym.Wrapper):
     def _transform_action(self, act: ActType):
         if self.act_transform:
             act = self.act_transform(act)
-        return torch.tensor(act).to(device=self.device).unsqueeze(0)
+        return torch.tensor(act, dtype=torch.float32).to(device=self.device).unsqueeze(0)
     
     def _transform_obs(self, obs: ObsType):
         if self.obs_transform:
             obs = self.obs_transform(obs)
-        return torch.tensor(obs).to(device=self.device).unsqueeze(0)
+        return torch.tensor(obs, dtype=torch.float32).to(device=self.device).unsqueeze(0)
 
     def step(self, action):
         # Step the real env

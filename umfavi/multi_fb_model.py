@@ -22,7 +22,8 @@ class MultiFeedbackTypeModel(nn.Module):
         obs = kwargs[SampleKey.OBS]
         next_obs = kwargs[SampleKey.NEXT_OBS]
         action_feats = kwargs[SampleKey.ACT_FEATS]
-        next_action_feats = kwargs[SampleKey.NEXT_ACT_FEATS]
+        # next_action_feats = kwargs[SampleKey.NEXT_ACT_FEATS]
+        next_action_feats = None
         dones = kwargs[SampleKey.DONES]
         
         mean, log_var = self.encoder(obs, action_feats, next_obs)

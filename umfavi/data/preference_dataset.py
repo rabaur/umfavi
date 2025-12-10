@@ -77,8 +77,9 @@ class PreferenceDataset(Dataset):
 
             # Generate two trajectories using imported function
             # Add one step in case next_obs (next_state) are needed
-            traj1 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=i)
-            traj2 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=i)
+            # Use different seeds for each trajectory to get diverse pairs
+            traj1 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=2*i)
+            traj2 = rollout(self.env, policy, num_steps=self.n_steps + 1, seed=2*i + 1)
 
             # Extract state-action pairs
             traj1_dict = unpack_trajectory(traj1)

@@ -29,6 +29,7 @@ def td_error_regularizer(**kwargs) -> torch.Tensor:
     dones = kwargs[SampleKey.DONES].squeeze(-1)  # (batch_size,)
     q_curr = kwargs["q_curr"]  # (batch_size, n_actions)
     q_next = kwargs["q_next"]  # (batch_size, n_actions)
+
     reward_mean = kwargs["reward_mean"]  # (batch_size,) or (batch_size, 1)
     reward_std = log_var_to_std(kwargs["reward_log_var"])  # (batch_size,) or (batch_size, 1)
 
@@ -44,8 +45,8 @@ def td_error_regularizer(**kwargs) -> torch.Tensor:
     # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
     q_next_a = torch.gather(q_next, dim=-1, index=acts_next).squeeze(-1)  # (batch_size,)
 
-    # Set Q_next to 0 for terminal states (done=True means terminal)
-    q_next_a = q_next_a * (1.0 - dones)
+    # if acts_next is -1, set q_next_a to 0
+    q_next_a = q_next_a * (1.0 - (acts_next == -1).float())
 
     # Compute TD-error: R(s,a) = Q(s,a) - γ * Q(s',a')
     td_error = q_curr_a - gamma * q_next_a  # (batch_size,)

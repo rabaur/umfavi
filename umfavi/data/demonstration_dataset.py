@@ -33,7 +33,8 @@ class DemonstrationDataset(Dataset):
         num_steps: Optional[int] = None,
         obs_transform: Optional[Callable] = None,
         act_transform: Optional[Callable] = None,
-        name: Optional[str] = "train"
+        name: Optional[str] = "train",
+        subsample_factor: int = 1,
     ):
         """
         Initialize demonstration dataset.
@@ -52,6 +53,7 @@ class DemonstrationDataset(Dataset):
                 If `done` is received before `num_steps` steps, the remaining datapoints will be padded with nan-equivalent value.
             obs_transform: Optional transformation for observations
             act_transform: Optional transformation for actions
+            subsample_factor: Keep every k-th transition (default=1, no sub-sampling)
         """
         self.num_demonstrations = num_demonstrations
         self.num_steps = num_steps
@@ -63,6 +65,7 @@ class DemonstrationDataset(Dataset):
         self.obs_transform = obs_transform
         self.act_transform = act_transform
         self.name = name
+        self.subsample_factor = subsample_factor
         
         # Generate demonstrations
         self.data = self.generate_demonstrations(policy=policy)
@@ -99,6 +102,13 @@ class DemonstrationDataset(Dataset):
 
             # Add dummy action for next-action
             next_acts = np.concatenate([acts_full[1:], np.array([-1])[:, None]], axis=0)
+
+            # Sub-sample: keep every k-th transition
+            if self.subsample_factor > 1:
+                for k in traj_demo_data.keys():
+                    traj_demo_data[k] = traj_demo_data[k][::self.subsample_factor]
+                next_acts = next_acts[::self.subsample_factor]
+
             data[SampleKey.NEXT_ACTS].append(next_acts)
 
             # Append the newly generated trajectory

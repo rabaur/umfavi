@@ -119,7 +119,7 @@ def main(args):
     if args.log_wandb:
         wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.Adam(fb_model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in train_dataloaders.items()}
@@ -198,8 +198,11 @@ def main(args):
             
             # 2. backprop
             total_loss.backward()
+
+            # 3. clip gradients
+            torch.nn.utils.clip_grad_norm_(fb_model.parameters(), max_norm=1.0)
             
-            # 3. step (cumulative loss)
+            # 4. step (cumulative loss)
             optimizer.step()
             
             # Log to wandb and console every N steps
@@ -300,6 +303,7 @@ if __name__ == "__main__":
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=None, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
+    parser.add_argument("--subsample_factor", type=int, default=1, help="Keep every k-th transition in demonstrations (AVRIL uses 5 for LunarLander)")
     parser.add_argument("--expert_policy_path", type=str, default="logs/dqn/LunarLander-v3_1/best_model.zip", help="Path to expert policy")
     
     # Policy parameters

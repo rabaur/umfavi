@@ -53,7 +53,7 @@ def rollout(
     step = 0
     
     while not done:
-        if num_steps and step > num_steps:
+        if num_steps and step >= num_steps:
             break
         action = policy(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
@@ -132,7 +132,7 @@ def get_obs_dim(env: gym.Env, observation_transform: Callable = None) -> int:
         rand_obs = observation_transform(rand_obs)
     if isinstance(rand_obs, np.ndarray):
         return rand_obs.shape[0]
-    elif isinstance(rand_obs, int) or isinstance(rand_obs, float):
+    elif isinstance(rand_obs, int) or isinstance(rand_obs, float) or isinstance(rand_obs, np.integer):
         return 1
     else:
         raise ValueError(f"Invalid observation type: {type(rand_obs)}")
