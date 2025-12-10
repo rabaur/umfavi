@@ -7,8 +7,9 @@ from umfavi.envs.get_env import get_env
 from umfavi.data.get_dataset import get_dataset
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.evaluation.epic import epic_distance
-from umfavi.evaluation.regret import evaluate_regret_tabular, evaluate_regret_non_tabular
+from umfavi.evaluation.regret import compute_regret
 from umfavi.evaluation.val_loss import compute_eval_loss
+from umfavi.evaluation.spearmanr import evaluate_spearmanr
 from umfavi.multi_fb_model import MultiFeedbackTypeModel
 from umfavi.utils.policies import (
     create_expert_policy,
@@ -70,14 +71,8 @@ def main(args):
     
     # Create policies (all sharing the same Q-value model)
     policies = {}
-    policies[FeedbackType.PREFERENCE] = create_expert_policy(
-        q_model=q_model,
-        rationality=args.pref_trajectory_rationality, 
-    )
-    policies[FeedbackType.DEMONSTRATION] = create_expert_policy(
-        q_model=q_model,
-        rationality=args.demo_rationality, 
-    )
+    policies[FeedbackType.PREFERENCE] = create_expert_policy(q_model=q_model, rationality=args.pref_trajectory_rationality)
+    policies[FeedbackType.DEMONSTRATION] = create_expert_policy(q_model=q_model, rationality=args.demo_rationality)
     
     # Define action and observation transforms
     act_transform = get_action_transform(args, env)
@@ -88,8 +83,8 @@ def main(args):
     act_dim = get_act_dim(env, act_transform)
 
     # Create datasets and dataloaders
-    _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
-    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform)
+    _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform, name="train")
+    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform, name="val")
 
     feature_module = MLPFeatureModule(
         obs_dim,
@@ -102,7 +97,7 @@ def main(args):
     # Create decoders only for active feedback types
     decoders = {}
 
-    Q_value_model = MLPFeatureModule(
+    q_value_model = MLPFeatureModule(
         state_dim=obs_dim,
         action_dim=None,  # Not used since reward_domain='s'
         hidden_sizes=args.q_value_hidden_sizes + [act_dim],
@@ -115,7 +110,7 @@ def main(args):
     # Create multi-feedback model
     fb_model = MultiFeedbackTypeModel(
         encoder=reward_encoder,
-        Q_value_model=Q_value_model,
+        Q_value_model=q_value_model,
         decoders=decoders
     )
     fb_model.to(device)
@@ -153,9 +148,6 @@ def main(args):
         
         # Track losses per feedback type
         epoch_log_dict = {}
-        
-        # Initialize estimated expert policy (will be set during evaluation if non-tabular)
-        est_expert_policy = None
         
         print(f"Epoch {epoch}/{args.num_epochs-1} - Training...")
         
@@ -201,12 +193,14 @@ def main(args):
                 # Update epoch log dict for this feedback type
                 epoch_log_dict = update_epoch_log_dict(epoch_log_dict, loss_dict, fb_type)
             
-            # Backpropagate combined loss
+            # 1. zero gradients
+            optimizer.zero_grad()
+            
+            # 2. backprop
             total_loss.backward()
             
-            # Single optimizer step after processing all feedback types
+            # 3. step (cumulative loss)
             optimizer.step()
-            optimizer.zero_grad()
             
             # Log to wandb and console every N steps
             if (global_step) % args.log_every_n_steps == 0:
@@ -222,7 +216,7 @@ def main(args):
         # -----------------------------------------------
         # Evaluation
         # -----------------------------------------------
-        if epoch % args.eval_every_n_epochs == 0:
+        if args.val_every_n_epochs and epoch % args.val_every_n_epochs == 0:
             
             print(f"  Evaluating...")
             fb_model.eval()
@@ -233,17 +227,27 @@ def main(args):
             # eval_metrics["eval/epic_distance"] = epic_dist
             
             # Compute expected regret
-            if is_tabular:
-                regret = evaluate_regret_tabular(env, reward_encoder, gamma=args.gamma, num_samples=100_000)
-            else:
-                wrapped_env = LearnedRewardWrapper(env, fb_model.encoder, act_transform, obs_transform)
-                regret, mean_rew, est_expert_policy = evaluate_regret_non_tabular(optimal_policy, env, wrapped_env, gamma=args.gamma, max_num_steps=1000)
-                eval_metrics["eval/mean_rew"] = mean_rew
+            regret, mean_rew, est_optimal_policy = compute_regret(
+                env,
+                reward_encoder,
+                optimal_policy,
+                args.gamma,
+                num_samples=100,
+                max_num_steps=1000,
+                act_transform=act_transform,
+                obs_transform=obs_transform
+            )
             eval_metrics["eval/regret"] = regret
+            eval_metrics["eval/mean_rew"] = mean_rew
 
             # Compute evaluation losses
             with torch.no_grad():
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
+
+            # Compute Spearman correlation on validation data
+            for fb_type, val_dl in val_dataloaders.items():
+                spearman_corr = evaluate_spearmanr(reward_encoder, val_dl)
+                eval_metrics[f"eval/spearman_{fb_type.value}"] = spearman_corr
 
             # Log to wandb
             if args.log_wandb:
@@ -257,7 +261,7 @@ def main(args):
             fb_model.train()
         
         # Visualization 
-        if epoch % args.vis_every_n_epochs == 0:
+        if args.vis_every_n_epochs and epoch % args.vis_every_n_epochs == 0:
             print(f"  Generating visualization...")
             fb_model.eval()
 
@@ -296,23 +300,23 @@ if __name__ == "__main__":
     parser.add_argument("--reward_domain", type=str, default="s", help="Either state-only ('s'), state-action ('sa'), state-action-next-state ('sas')")
     parser.add_argument("--num_steps", type=int, default=None, help="Length of each trajectory")
     parser.add_argument("--td_error_weight", type=float, default=1.0, help="Weight for TD-error constraint in demonstrations")
-    parser.add_argument("--expert_policy_path", type=str, default=None, help="Path to expert policy")
+    parser.add_argument("--expert_policy_path", type=str, default="logs/dqn/LunarLander-v3_1/best_model.zip", help="Path to expert policy")
     
     # Policy parameters
     parser.add_argument("--pref_rationality", type=float, default=5.0, help="Rationality for Bradley-Terry model")
     parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
-    parser.add_argument("--demo_rationality", type=float, default=20.0, help="Rationality for expert policy")
+    parser.add_argument("--demo_rationality", type=float, default=float("inf"), help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
     # Training parameters
     parser.add_argument("--num_epochs", type=int, default=2000)
-    parser.add_argument("--eval_every_n_epochs", type=int, default=10)
+    parser.add_argument("--val_every_n_epochs", type=lambda x: None if x.lower() == "none" else int(x), default=None)
+    parser.add_argument("--vis_every_n_epochs", type=lambda x: None if x.lower() == "none" else int(x), default=None)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight - use kl_restart_period for annealing")
-    parser.add_argument("--vis_every_n_epochs", type=int, default=10, help="Frequency of visualizations (epochs)")
-    parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for encoder MLP")
-    parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[64, 64], help="Hidden sizes for Q-value MLP")
+    parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight")
+    parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[256, 256, 256], help="Hidden sizes for encoder MLP")
+    parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[256, 256, 256], help="Hidden sizes for Q-value MLP")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import gymnasium as gym
 from typing import Callable
+from concurrent.futures import ThreadPoolExecutor
 from umfavi.learned_reward_wrapper import LearnedRewardWrapper
 from umfavi.utils.tabular import q_opt
 from umfavi.utils.policies import (
@@ -14,6 +15,9 @@ from umfavi.encoder.reward_encoder import RewardEncoder
 from umfavi.utils.feature_transforms import get_feature_combinations
 from umfavi.utils.gym import rollout, get_discounted_return, get_undiscounted_return
 from umfavi.utils.torch import to_numpy
+from umfavi.utils.sb3 import train_dqn
+from tqdm import tqdm
+from umfavi.true_reward_callback import TrueRewardCallback
 
 
 def value_under_policy(P, R_true, gamma, pi):
@@ -35,7 +39,7 @@ def value_under_policy(P, R_true, gamma, pi):
     return V  # shape (S,)
 
 
-def evaluate_regret_tabular(
+def regret_tabular(
     env: TabularEnv,
     encoder: RewardEncoder,
     all_obs_features: torch.Tensor,
@@ -43,7 +47,6 @@ def evaluate_regret_tabular(
     gamma: float,
     max_iter: int = 1000,
     tol: float = 1e-6,
-    num_samples: int = 1000
 ) -> float:
     """
     Computes expected regret over states.
@@ -90,13 +93,36 @@ def evaluate_regret_tabular(
     return regret
 
 
-def evaluate_regret_non_tabular(
+def compute_single_regret_sample(
+    seed: int,
+    env_id: str,
+    true_expert_policy: ExpertPolicy,
+    est_optimal_policy: ExpertPolicy,
+    gamma: float,
+    max_num_steps: int,
+) -> tuple[float, float]:
+    """Compute regret for a single sample (used for parallel execution)."""
+    # Create fresh env instance per thread to avoid race conditions
+    env = gym.make(env_id)
+    
+    traj_expert = rollout(env, true_expert_policy, num_steps=max_num_steps, seed=seed)
+    ret_expert = get_discounted_return(traj_expert, gamma)
+    
+    traj_est = rollout(env, est_optimal_policy, num_steps=max_num_steps, seed=seed)
+    ret_est = get_discounted_return(traj_est, gamma)
+    cum_rew = get_undiscounted_return(traj_est)
+    
+    env.close()
+    return ret_expert - ret_est, cum_rew
+
+
+def regret_non_tabular(
     true_expert_policy: ExpertPolicy,
     base_env: gym.Env,
     wrapped_env: LearnedRewardWrapper,
     gamma: float,
     num_samples: int = 1000,
-    max_num_steps: int = 100,
+    max_num_steps: int = 100
 ) -> tuple[float, float, ExpertPolicy]:
     """
     MC estimate of the expected regret and the mean return of the estimated expert policy.
@@ -105,28 +131,54 @@ def evaluate_regret_non_tabular(
         tuple: (regret, mean_reward, estimated_expert_policy)
     """
     # Train a new DQN model on the wrapped environment with learned reward
-    dqn_model = load_or_train_dqn(wrapped_env, gamma=gamma, force_train=True, training_timesteps=1000)
+    print(f"Training DQN model on estimated reward function...")
+    dqn_model = train_dqn(wrapped_env, base_env.unwrapped.spec.id)
     q_model = DQNQValueModel(dqn_model)
-    est_expert_policy = create_expert_policy(wrapped_env, rationality=float("inf"), q_model=q_model)
+    est_optimal_policy = create_expert_policy(q_model, rationality=float("inf"))
     
-    regret = 0
-    mean_rew = 0
-    for i in range(num_samples):
-        # Roll out both policies from the same initial state for fair comparison
-        seed = i  # Use iteration index as seed for reproducibility
-        
-        # Rollout true expert policy
-        traj_expert = rollout(base_env, true_expert_policy, num_steps=max_num_steps, seed=seed)
-        ret_expert = get_discounted_return(traj_expert, gamma)
-        
-        # Rollout estimated expert policy from the same initial state
-        traj_est = rollout(base_env, est_expert_policy, num_steps=max_num_steps, seed=seed)
-        ret_est = get_discounted_return(traj_est, gamma)
-        cum_rew = get_undiscounted_return(traj_est)
-        mean_rew += cum_rew
-        regret += ret_expert - ret_est
+    env_id = base_env.unwrapped.spec.id
     
-    return regret / num_samples, mean_rew / num_samples, est_expert_policy
+    regrets = np.empty(num_samples)
+    rewards = np.empty(num_samples)
+    for i in tqdm(range(num_samples), desc="Computing regret"):
+        regrets[i], rewards[i] = compute_single_regret_sample(
+            seed=i,
+            env_id=env_id,
+            true_expert_policy=true_expert_policy,
+            est_optimal_policy=est_optimal_policy,
+            gamma=gamma,
+            max_num_steps=max_num_steps,
+        )
+    return np.mean(regrets), np.mean(rewards), est_optimal_policy
 
-    
-
+# Compute expected regret
+def compute_regret(
+    env: TabularEnv | gym.Env,
+    reward_encoder: RewardEncoder,
+    optimal_policy: ExpertPolicy,
+    gamma: float,
+    num_samples: int,
+    max_num_steps: int,
+    act_transform: Callable,
+    obs_transform: Callable,
+):
+    regret = None
+    mean_rew = None
+    est_optimal_policy = None
+    if isinstance(env, TabularEnv):
+        regret = regret_tabular(
+            env,
+            reward_encoder,
+            gamma=gamma
+        )
+    else:
+        wrapped_env = LearnedRewardWrapper(env, reward_encoder, act_transform, obs_transform)
+        regret, mean_rew, est_optimal_policy = regret_non_tabular(
+            optimal_policy,
+            env,
+            wrapped_env,
+            gamma=gamma,
+            num_samples=num_samples,
+            max_num_steps=max_num_steps
+        )
+    return regret, mean_rew, est_optimal_policy

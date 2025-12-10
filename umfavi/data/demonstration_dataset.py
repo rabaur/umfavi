@@ -4,10 +4,18 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable, Optional
 import gymnasium as gym
-from umfavi.utils.gym import unpack_trajectory, rollout, get_undiscounted_return
+from umfavi.utils.gym import rollout, unpack_trajectory, get_undiscounted_return
 from umfavi.utils.feature_transforms import apply_transform
 from umfavi.types import TrajKeys, SampleKey, FeedbackType
-import matplotlib.pyplot as plt
+
+
+def print_dataset_stats(returns: list[float], traj_lengths: list[int], name: str) -> None:
+    """Print concise statistics about the demonstration dataset."""
+    returns = np.array(returns)
+    lengths = np.array(traj_lengths)
+    print(f"{name} Dataset: Demos: {len(returns)} | Steps: {lengths.sum()}")
+    print(f"{name} Dataset: Return: {returns.mean():.1f} ± {returns.std():.1f} [{returns.min():.1f}, {returns.max():.1f}]")
+    print(f"{name} Dataset: Length: {lengths.mean():.1f} ± {lengths.std():.1f} [{lengths.min()}, {lengths.max()}]")
 
 class DemonstrationDataset(Dataset):
     """
@@ -24,7 +32,8 @@ class DemonstrationDataset(Dataset):
         td_error_weight: float = 1.0,
         num_steps: Optional[int] = None,
         obs_transform: Optional[Callable] = None,
-        act_transform: Optional[Callable] = None
+        act_transform: Optional[Callable] = None,
+        name: Optional[str] = "train"
     ):
         """
         Initialize demonstration dataset.
@@ -53,6 +62,7 @@ class DemonstrationDataset(Dataset):
         self.td_error_weight = td_error_weight
         self.obs_transform = obs_transform
         self.act_transform = act_transform
+        self.name = name
         
         # Generate demonstrations
         self.data = self.generate_demonstrations(policy=policy)
@@ -72,7 +82,7 @@ class DemonstrationDataset(Dataset):
         
         # Add one extra step to the trajectory to get the next observation
         num_steps = self.num_steps + 1 if self.num_steps else None
-        rews = []
+        returns, traj_lengths = [], []
         for i in range(self.num_demonstrations):
 
             # Generate trajectory using the expert policy
@@ -81,22 +91,21 @@ class DemonstrationDataset(Dataset):
             # Extract state-action pairs from trajectory
             traj_demo_data = unpack_trajectory(traj_demo)
 
-            cum_rews = get_undiscounted_return(traj_demo)
-            rews.append(cum_rews)
+            returns.append(get_undiscounted_return(traj_demo))
+            traj_lengths.append(len(traj_demo))
 
             # Differentiate between actions and next-actions, since not returned explicitly by the environment
             acts_full = traj_demo_data[SampleKey.ACTS]
 
             # Add dummy action for next-action
-            next_acts = np.concatenate([acts_full[:-1], np.array([-1])[:, None]], axis=0)
+            next_acts = np.concatenate([acts_full[1:], np.array([-1])[:, None]], axis=0)
             data[SampleKey.NEXT_ACTS].append(next_acts)
 
             # Append the newly generated trajectory
             for k in traj_demo_data.keys():
                 data[k.value].append(traj_demo_data[k])
         
-        plt.hist(rews, bins=100)
-        plt.show()
+        print_dataset_stats(returns, traj_lengths, self.name)
         
         # Initialize states and action_features as copies of observations and actions
         # (they may be transformed later)

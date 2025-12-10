@@ -3,6 +3,7 @@ import gymnasium as gym
 from typing import Callable, Optional
 from umfavi.encoder.reward_encoder import BaseRewardEncoder
 from umfavi.types import ActType, ObsType
+from umfavi.utils.torch import get_model_device
 
 class LearnedRewardWrapper(gym.Wrapper):
     
@@ -25,7 +26,7 @@ class LearnedRewardWrapper(gym.Wrapper):
         self._last_obs = None
         self.act_transform = act_transform
         self.obs_transform = obs_transform
-        self.device = next(iter(reward_encoder.parameters())).get_device()
+        self.device = get_model_device(reward_encoder)
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
@@ -35,12 +36,12 @@ class LearnedRewardWrapper(gym.Wrapper):
     def _transform_action(self, act: ActType):
         if self.act_transform:
             act = self.act_transform(act)
-        return torch.tensor(act).to(device=self.device)
+        return torch.tensor(act).to(device=self.device).unsqueeze(0)
     
     def _transform_obs(self, obs: ObsType):
         if self.obs_transform:
             obs = self.obs_transform(obs)
-        return torch.tensor(obs).to(device=self.device)
+        return torch.tensor(obs).to(device=self.device).unsqueeze(0)
 
     def step(self, action):
         # Step the real env
@@ -52,6 +53,7 @@ class LearnedRewardWrapper(gym.Wrapper):
         
         # Compute learned reward
         learned_r = self.reward_encoder.predict_and_sample(last_obs_tensor, action_tensor, next_obs_tensor)
+        learned_r = float(learned_r.detach().cpu().item())
 
         # Store for next call
         self._last_obs = next_obs

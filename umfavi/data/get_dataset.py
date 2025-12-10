@@ -1,9 +1,10 @@
+from typing import Optional
 from umfavi.data.preference_dataset import PreferenceDataset
 from umfavi.data.demonstration_dataset import DemonstrationDataset
 from umfavi.types import FeedbackType
 from torch.utils.data import DataLoader
 
-def get_dataset(active_feedback_types, args, env, policies, device, obs_transform, action_transform):
+def get_dataset(active_feedback_types, args, env, policies, device, obs_transform, action_transform, name: Optional[str] = "train"):
     datasets = {}
     dataloaders = {}
     if FeedbackType.PREFERENCE in active_feedback_types:
@@ -34,6 +35,7 @@ def get_dataset(active_feedback_types, args, env, policies, device, obs_transfor
             td_error_weight=args.td_error_weight,
             obs_transform=obs_transform,
             act_transform=action_transform,
+            name=name,
         )
         datasets[FeedbackType.DEMONSTRATION] = demo_dataset
         dataloaders[FeedbackType.DEMONSTRATION] = DataLoader(demo_dataset, batch_size=args.batch_size, shuffle=True)
