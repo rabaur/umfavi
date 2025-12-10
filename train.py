@@ -59,7 +59,6 @@ def main(args):
 
         gym_env = gym.make(args.env_name)
         env = MiniGridWrapper(gym_env)
-        print("SJDFJSHKDFHS", env.observation_space)
     else:
         raise ValueError(f"Unsupported environment name: {args.env_name}")
     

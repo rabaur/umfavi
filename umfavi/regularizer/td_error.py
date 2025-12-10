@@ -42,7 +42,9 @@ def td_error_regularizer(**kwargs) -> torch.Tensor:
     q_curr_a = torch.gather(q_curr, dim=-1, index=acts_curr).squeeze(-1)  # (batch_size,)
     
     # Select Q(s_{t+1}, a_{t+1}) for next state-action pairs
+    print(acts_curr, acts_next)
     q_next_a = torch.gather(q_next, dim=-1, index=acts_next).squeeze(-1)  # (batch_size,)
+
 
     # Set Q_next to 0 for terminal states (done=True means terminal)
     q_next_a = q_next_a * (1.0 - dones)
