@@ -1,6 +1,7 @@
 import gymnasium as gym
 from typing import Any, Callable, Optional
 import numpy as np
+from numpy.typing import NDArray
 from umfavi.envs.grid_env.env import GridEnv
 from umfavi.types import TrajectoryType, TrajKeys
 
@@ -23,14 +24,13 @@ def _create_nan_like(value):
         # For other types, return np.nan as fallback
         return INVALID_FLOAT
 
-
 def rollout(
     env: gym.Env,
     policy: Callable,
     num_steps: Optional[int] = None,
     pad: bool = True,
     seed: int = None
-) -> TrajectoryType:
+) -> dict[TrajKeys, NDArray[Any]]:
     """
     Rollout a policy in an environment for n_steps.
     
@@ -42,79 +42,73 @@ def rollout(
         seed: Optional seed for environment reset
     
     Returns:
-        List of (obs, action, reward, next_obs, done, info) tuples
+        Dictionary mapping TrajKeys to numpy arrays of trajectory data.
     """
-    ep = []
+    traj = {k: [] for k in TrajKeys}
     if seed is not None:
         obs, _ = env.reset(seed=seed)
     else:
         obs, _ = env.reset()
-    done = False
+    terminated = False
+    truncated = False
     step = 0
+    action = None
+    info = {}
     
-    while not done:
+    while not terminated and not truncated:
         if num_steps and step >= num_steps:
             break
         action = policy(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        ep.append((obs, action, reward, next_obs, done, info))
+        # if obs and actions are scalars, convert to 1D arrays
+        obs = np.atleast_1d(obs)
+        action = np.atleast_1d(action)
+        next_obs = np.atleast_1d(next_obs)
+        traj[TrajKeys.OBS].append(obs)
+        traj[TrajKeys.ACTS].append(action)
+        traj[TrajKeys.REWS].append(reward)
+        traj[TrajKeys.NEXT_OBS].append(next_obs)
+        traj[TrajKeys.TERMINATED].append(terminated)
+        traj[TrajKeys.TRUNCATED].append(truncated)
+        traj[TrajKeys.INVALID].append(False)
+        for k, v in info.items():
+            traj[k].append(v)
         obs = next_obs
         step += 1
     
     # Pad trajectory if it ended early
     if num_steps and pad and step < num_steps:
         nan_obs = _create_nan_like(obs)
-        nan_action = _create_nan_like(action)
+        nan_obs = np.atleast_1d(nan_obs)
+        # Use action from last step, or sample from action space if no steps taken
+        nan_action = _create_nan_like(action) if action is not None else _create_nan_like(env.action_space.sample())
+        nan_action = np.atleast_1d(nan_action)
         nan_reward = INVALID_FLOAT
-        nan_info = {}
+        nan_info = {k: INVALID_FLOAT for k in info.keys()}
         
         for _ in range(num_steps - step):
-            ep.append((nan_obs, nan_action, nan_reward, nan_obs, True, nan_info))
+            traj[TrajKeys.OBS].append(nan_obs)
+            traj[TrajKeys.ACTS].append(nan_action)
+            traj[TrajKeys.REWS].append(nan_reward)
+            traj[TrajKeys.NEXT_OBS].append(nan_obs)
+            traj[TrajKeys.TERMINATED].append(True)
+            traj[TrajKeys.TRUNCATED].append(True)
+            traj[TrajKeys.INVALID].append(True)
+            for k, v in nan_info.items():
+                traj[k].append(v)
     
-    return ep
+    # Convert to numpy arrays
+    for k in traj.keys():
+        traj[k] = np.array(traj[k])
+
+    return traj
 
 
-def unpack_trajectory(trajectory: TrajectoryType) -> dict[str, list[Any]]:
-    """
-    Unpack a trajectory into a dictionary of lists. Info dicts of the original trajectory are flattened.
-    """
-    traj_dict = {
-        TrajKeys.OBS: [obs for obs, _, _, _, _, _ in trajectory],
-        TrajKeys.ACTS: [act for _, act, _, _, _, _ in trajectory],
-        TrajKeys.REWS: [rew for _, _, rew, _, _, _ in trajectory],
-        TrajKeys.NEXT_OBS: [next_obs for _, _, _, next_obs, _, _ in trajectory],
-        TrajKeys.DONES: [done for _, _, _, _, done, _ in trajectory]
-    }
-    infos = [info for _, _, _, _, _, info in trajectory]
-    # Only unpack info keys if there are non-empty infos
-    if infos and infos[0]:
-        traj_dict.update({k: [info.get(k, INVALID_FLOAT) for info in infos] for k in infos[0].keys()})
-    
-    # Standardize: ensure all data has feature dimension for uniform handling
-    # Convert scalars (actions, rewards, dones) to have explicit feature dimension
-    for key in traj_dict.keys():
-        arr = np.array(traj_dict[key])
-        # If 1D (scalar per timestep), add feature dimension: (T,) -> (T, 1)
-        if arr.ndim == 1:
-            traj_dict[key] = arr[:, None]
-        else:
-            traj_dict[key] = arr
-    
-    return traj_dict
+def get_undiscounted_return(trajectory: dict[TrajKeys, NDArray]):
+    return np.nansum(trajectory[TrajKeys.REWS])
 
-
-def get_undiscounted_return(trajectory: TrajectoryType):
-    rewards = np.array([r for _, _, r, _, _, _ in trajectory])
-    return np.nansum(rewards)
-
-
-def get_discounted_return(trajectory: TrajectoryType, gamma: float):
-    rewards = np.array([r for _, _, r, _, _, _ in trajectory])
-    T = len(rewards)
-    gammas = gamma ** np.arange(T)
-    return np.nansum(rewards * gammas)
-
+def get_discounted_return(trajectory: dict[TrajKeys, NDArray], gamma: float):
+    return np.nansum(trajectory[TrajKeys.REWS] * gamma ** np.arange(len(trajectory[TrajKeys.REWS])))
 
 def is_registered_gym_env(env_name: str) -> bool:
     """

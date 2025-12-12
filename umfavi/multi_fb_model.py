@@ -22,23 +22,28 @@ class MultiFeedbackTypeModel(nn.Module):
         obs = kwargs[SampleKey.OBS]
         next_obs = kwargs[SampleKey.NEXT_OBS]
         action_feats = kwargs[SampleKey.ACT_FEATS]
-        # next_action_feats = kwargs[SampleKey.NEXT_ACT_FEATS]
-        next_action_feats = None
-        dones = kwargs[SampleKey.DONES]
+        next_action_feats = kwargs[SampleKey.NEXT_ACT_FEATS]
+        invalid = kwargs[SampleKey.INVALID]
+        
+        # Replace NaN values with zeros (padded timesteps have NaN observations)
+        obs = torch.nan_to_num(obs, nan=0.0)
+        next_obs = torch.nan_to_num(next_obs, nan=0.0)
+        action_feats = torch.nan_to_num(action_feats, nan=0.0)
+        next_action_feats = torch.nan_to_num(next_action_feats, nan=0.0)
         
         mean, log_var = self.encoder(obs, action_feats, next_obs)
         reward_samples = self.encoder.sample(mean, log_var)
-        kl_div = kl_divergence_std_normal(mean, log_var, dones)
+        kl_div = kl_divergence_std_normal(mean, log_var, invalid)
 
         # Route to appropriate head with all kwargs
-        head = self.decoders[kwargs[SampleKey.FEEDBACK_TYPE][0]]  # we can assume that all feedback types are the same per batch
+        fb_type = kwargs[SampleKey.FEEDBACK_TYPE][0]
+        head = self.decoders[fb_type]  # we can assume that all feedback types are the same per batch
         
         # Add reward mean and log_var to kwargs for decoders that need them
         kwargs["reward_mean"] = mean.squeeze(-1)
         kwargs["reward_log_var"] = log_var.squeeze(-1)
 
-        # Compute Q-value estimates. Get gradients for q-value model only for demonstration feedback type.
-        # Otherwise, it is not well defined.
+        # Compute Q-value estimates (use cleaned obs without NaN)
         q_curr = self.Q_value_model(obs)
         q_next = self.Q_value_model(next_obs)
         kwargs["q_curr"] = q_curr
@@ -50,9 +55,16 @@ class MultiFeedbackTypeModel(nn.Module):
         nll, metrics = result
 
         # Regularization
-        td_error = td_error_regularizer(**kwargs)
+        if fb_type == FeedbackType.DEMONSTRATION:
+            td_error = td_error_regularizer(**kwargs)
+        else:
+            td_error = 0.0
 
         # Create final output
-        output = {"negative_log_likelihood": nll, "kl_divergence": kl_div, "td_error": td_error}
+        output = {
+            "negative_log_likelihood": nll,
+            "kl_divergence": kl_div,
+            "td_error": td_error,
+        }
         output.update(metrics)
         return output

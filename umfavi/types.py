@@ -14,7 +14,9 @@ class TrajKeys(str, Enum):
     ACTS = "actions"
     REWS = "rewards"
     NEXT_OBS = "next_observations"
-    DONES = "dones"
+    TERMINATED = "terminated"
+    TRUNCATED = "truncated"
+    INVALID = "invalid"
 
 
 class SampleKey(str, Enum):
@@ -38,7 +40,9 @@ class SampleKey(str, Enum):
     # Equal to acts if actions == action features
     ACT_FEATS = "action_features"
     NEXT_ACT_FEATS = "next_action_features"
-    DONES = "dones"
+    INVALID = "invalid"
+    TERMINATED = "terminated"
+    TRUNCATED = "truncated"
     TARGETS = "targets"
     RATIONALITY = "rationality"
     GAMMA = "gamma"

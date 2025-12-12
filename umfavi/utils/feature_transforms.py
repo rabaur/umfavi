@@ -3,9 +3,11 @@ import torch
 import gymnasium as gym
 from typing import Callable
 
-def to_one_hot(discr_x: int, n: int) -> np.ndarray:
+def to_one_hot(discr_x: float, n: int) -> np.ndarray:
     one_hot = np.zeros(n, dtype=np.float32)
-    one_hot[discr_x] = 1
+    if np.isnan(discr_x):
+        return one_hot
+    one_hot[int(discr_x)] = 1
     return one_hot
 
 def get_action_transform(args, env: gym.Env) -> Callable:
@@ -54,7 +56,7 @@ def apply_transform(transform: Callable, x: np.ndarray) -> np.ndarray:
     x_flat = x.reshape(-1)
     
     # Apply transform to each element
-    transformed_list = [transform(int(elem)) for elem in x_flat]
+    transformed_list = [transform(elem) for elem in x_flat]
     
     # Check if transform returns arrays or scalars
     if len(transformed_list) > 0:

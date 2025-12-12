@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from typing import Callable, Optional
 import gymnasium as gym
-from umfavi.utils.gym import rollout, unpack_trajectory, get_undiscounted_return
+from umfavi.utils.gym import rollout, get_undiscounted_return
 from umfavi.utils.feature_transforms import apply_transform
 from umfavi.types import TrajKeys, SampleKey, FeedbackType
 
@@ -89,27 +89,22 @@ class DemonstrationDataset(Dataset):
         for i in range(self.num_demonstrations):
 
             # Generate trajectory using the expert policy
-            traj_demo = rollout(self.env, policy, num_steps=num_steps)
+            traj_demo_data = rollout(self.env, policy, num_steps=num_steps)
 
-            # Extract state-action pairs from trajectory
-            traj_demo_data = unpack_trajectory(traj_demo)
-
-            returns.append(get_undiscounted_return(traj_demo))
-            traj_lengths.append(len(traj_demo))
+            returns.append(get_undiscounted_return(traj_demo_data))
+            traj_lengths.append(len(traj_demo_data[TrajKeys.REWS]))
 
             # Differentiate between actions and next-actions, since not returned explicitly by the environment
-            acts_full = traj_demo_data[SampleKey.ACTS]
+            acts_full = traj_demo_data[TrajKeys.ACTS]
 
             # Add dummy action for next-action
             next_acts = np.concatenate([acts_full[1:], np.array([-1])[:, None]], axis=0)
+            traj_demo_data[SampleKey.NEXT_ACTS] = next_acts
 
             # Sub-sample: keep every k-th transition
             if self.subsample_factor > 1:
                 for k in traj_demo_data.keys():
                     traj_demo_data[k] = traj_demo_data[k][::self.subsample_factor]
-                next_acts = next_acts[::self.subsample_factor]
-
-            data[SampleKey.NEXT_ACTS].append(next_acts)
 
             # Append the newly generated trajectory
             for k in traj_demo_data.keys():

@@ -1,6 +1,6 @@
 import torch
 
-def kl_divergence_std_normal(mean: torch.Tensor, log_var: torch.Tensor, dones: torch.Tensor) -> torch.Tensor:
+def kl_divergence_std_normal(mean: torch.Tensor, log_var: torch.Tensor, invalid: torch.Tensor) -> torch.Tensor:
     """
     Compute KL divergence between q(reward|x) and p(reward) = N(0, 1).
     
@@ -15,8 +15,8 @@ def kl_divergence_std_normal(mean: torch.Tensor, log_var: torch.Tensor, dones: t
     # Compute KL divergence per element
     kl_loss = 0.5 * (mean.pow(2) + log_var.exp() - log_var - 1.0)
     
-    # Mask out invalid timesteps (where done=True)
-    valid_mask = ~dones.bool()  # True for valid timesteps
+    # Mask out invalid timesteps (where invalid=True)
+    valid_mask = ~invalid.bool()  # True for valid timesteps
     
     # Only compute mean over valid timesteps
     valid_kl = kl_loss[valid_mask]

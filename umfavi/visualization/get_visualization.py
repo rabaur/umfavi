@@ -23,6 +23,11 @@ def get_visualization(
             env=env,
             fb_model=fb_model,
         )
+    elif get_env_name(env) == "CartPole-v1":
+        fig = vis_cartpole(
+            env=env,
+            fb_model=fb_model,
+        )
     else: 
         raise NotImplementedError(f"Visualization for environment {get_env_name(env)} not implemented")
     return fig

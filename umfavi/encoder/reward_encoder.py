@@ -26,6 +26,10 @@ class RewardEncoder(BaseRewardEncoder):
         features = self.features(obs, acts, next_obs)
         mean = self.mean_head(features)
         logvar = self.logvar_head(features)
+        # Clamp log_var to prevent numerical instability:
+        # - Upper bound: exp(2) ≈ 7.4 std is reasonable for rewards
+        # - Lower bound: exp(-20) ≈ 1e-9 std prevents division by zero
+        logvar = torch.clamp(logvar, min=-20.0, max=2.0)
         return mean, logvar
     
     def sample(self, mean: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

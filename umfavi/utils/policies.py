@@ -197,7 +197,7 @@ class TabularExpertPolicy(ExpertPolicy):
             observation = observation[0]
         
         # Sample action from policy distribution
-        dist = self.policy[observation]
+        dist = self.policy[observation].squeeze()
         action = np.random.choice(self.env.action_space.n, p=dist)
         
         return action

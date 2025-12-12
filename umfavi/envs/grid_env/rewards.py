@@ -22,7 +22,7 @@ def to_flat_idx(i: int, j: int, grid_size):
     return i * grid_size + j
 
 def reward_sparse(grid_size: int, goal_position: tuple[int, int], goal_val: float):
-    R1d = np.zeros((grid_size, grid_size))
+    R1d = np.full((grid_size, grid_size), -0.1)
     R1d[goal_position[0], goal_position[1]] = goal_val
     R1d = np.reshape(R1d, (grid_size**2))
     R3d = Rs_to_Rsas(R1d, 5)

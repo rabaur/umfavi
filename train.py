@@ -84,7 +84,8 @@ def main(args):
 
     # Create datasets and dataloaders
     _, train_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform, name="train")
-    _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform, name="val")
+    if args.val_every_n_epochs:
+        _, val_dataloaders = get_dataset(active_feedback_types, args, env, policies, device, obs_transform, act_transform, name="val")
 
     feature_module = MLPFeatureModule(
         obs_dim,
@@ -119,7 +120,12 @@ def main(args):
     if args.log_wandb:
         wandb.watch(fb_model, log="all", log_freq=100)
 
-    optimizer = torch.optim.AdamW(fb_model.parameters(), lr=args.lr)
+    # Create optimizer with separate learning rates for encoder and Q-value model
+    optimizer = torch.optim.AdamW([
+        {"params": fb_model.encoder.parameters(), "lr": args.lr_encoder},
+        {"params": fb_model.Q_value_model.parameters(), "lr": args.lr_q_value},
+        {"params": fb_model.decoders.parameters(), "lr": args.lr_encoder},  # decoders use encoder lr
+    ])
 
     # Calculate number of batches per epoch (use the max across all dataloaders)
     dataloader_lengths = {fb_type: len(dl) for fb_type, dl in train_dataloaders.items()}
@@ -219,7 +225,7 @@ def main(args):
         # -----------------------------------------------
         # Evaluation
         # -----------------------------------------------
-        if args.val_every_n_epochs and epoch % args.val_every_n_epochs == 0:
+        if args.val_every_n_epochs and epoch % args.val_every_n_epochs == 0 and (not args.skip_first_val_epoch or epoch > 0):
             
             print(f"  Evaluating...")
             fb_model.eval()
@@ -230,27 +236,28 @@ def main(args):
             # eval_metrics["eval/epic_distance"] = epic_dist
             
             # Compute expected regret
-            regret, mean_rew, est_optimal_policy = compute_regret(
-                env,
-                reward_encoder,
-                optimal_policy,
-                args.gamma,
-                num_samples=100,
-                max_num_steps=1000,
-                act_transform=act_transform,
-                obs_transform=obs_transform
-            )
-            eval_metrics["eval/regret"] = regret
-            eval_metrics["eval/mean_rew"] = mean_rew
+            # regret, mean_rew, est_optimal_policy = compute_regret(
+            #     env,
+            #     reward_encoder,
+            #     optimal_policy,
+            #     args.gamma,
+            #     num_samples=100,
+            #     max_num_steps=1000,
+            #     act_transform=act_transform,
+            #     obs_transform=obs_transform
+            # )
+            # eval_metrics["eval/regret"] = regret
+            # eval_metrics["eval/mean_rew"] = mean_rew
 
             # Compute evaluation losses
             with torch.no_grad():
                 eval_metrics |= compute_eval_loss(val_dataloaders, active_feedback_types, fb_model)
 
             # Compute Spearman correlation on validation data
-            for fb_type, val_dl in val_dataloaders.items():
-                spearman_corr = evaluate_spearmanr(reward_encoder, val_dl)
-                eval_metrics[f"eval/spearman_{fb_type.value}"] = spearman_corr
+            with torch.no_grad():
+                for fb_type, val_dl in val_dataloaders.items():
+                    spearman_corr = evaluate_spearmanr(reward_encoder, val_dl)
+                    eval_metrics[f"eval/spearman_{fb_type.value}"] = spearman_corr
 
             # Log to wandb
             if args.log_wandb:
@@ -307,8 +314,8 @@ if __name__ == "__main__":
     parser.add_argument("--expert_policy_path", type=str, default="logs/dqn/LunarLander-v3_1/best_model.zip", help="Path to expert policy")
     
     # Policy parameters
-    parser.add_argument("--pref_rationality", type=float, default=5.0, help="Rationality for Bradley-Terry model")
-    parser.add_argument("--pref_trajectory_rationality", type=float, default=0.1, help="Rationality of the expert policy generating the comparison trajectories")
+    parser.add_argument("--pref_rationality", type=float, default=1.0, help="Rationality for Bradley-Terry model")
+    parser.add_argument("--pref_trajectory_rationality", type=float, default=5.0, help="Rationality of the expert policy generating the comparison trajectories")
     parser.add_argument("--demo_rationality", type=float, default=float("inf"), help="Rationality for expert policy")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     
@@ -317,10 +324,12 @@ if __name__ == "__main__":
     parser.add_argument("--val_every_n_epochs", type=lambda x: None if x.lower() == "none" else int(x), default=None)
     parser.add_argument("--vis_every_n_epochs", type=lambda x: None if x.lower() == "none" else int(x), default=None)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr_encoder", type=float, default=1e-4, help="Learning rate for reward encoder")
+    parser.add_argument("--lr_q_value", type=float, default=5e-4, help="Learning rate for Q-value model (typically higher)")
     parser.add_argument("--kl_weight", type=float, default=1.0, help="KL weight")
     parser.add_argument("--encoder_hidden_sizes", type=int, nargs="+", default=[256, 256, 256], help="Hidden sizes for encoder MLP")
     parser.add_argument("--q_value_hidden_sizes", type=int, nargs="+", default=[256, 256, 256], help="Hidden sizes for Q-value MLP")
+    parser.add_argument("--skip_first_val_epoch", action="store_true", help="Skip the first validation epoch")
     
     # Environment parameters
     parser.add_argument("--grid_size", type=int, default=10)

@@ -34,6 +34,8 @@ class DemonstrationsDecoder(BaseLogLikelihood):
         # Get the Q-value estimates
         q_curr = kwargs["q_curr"]  # (batch_size, n_actions)
 
+        assert not torch.any(acts == -1), "Invalid action encountered in demonstrations"
+
         # ------------------------------------------------------------------------------------------------
         # Boltzmann-rational expert policy likelihood
         # ------------------------------------------------------------------------------------------------

@@ -9,8 +9,8 @@ def get_dataset(active_feedback_types, args, env, policies, device, obs_transfor
     dataloaders = {}
     if FeedbackType.PREFERENCE in active_feedback_types:
         pref_dataset = PreferenceDataset(
-            n_samples=args.num_pref_samples,
-            n_steps=args.num_steps,
+            num_samples=args.num_pref_samples,
+            num_steps=args.num_steps,
             env=env,
             policy=policies[FeedbackType.PREFERENCE],
             device=device,
